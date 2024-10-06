@@ -1,0 +1,9 @@
+{
+    "terminal.integrated.cursorWidth": 1,
+    "editor.fontFamily": "'Hack NF', 'monospace', monospace",
+    "editor.defaultFormatter": null,
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    }
+}
