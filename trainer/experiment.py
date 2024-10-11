@@ -60,7 +60,7 @@ def train(args, model, train_dataset, test_dataset):
 
     # set training arguments
     training_args = TrainingArguments(
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -116,7 +116,7 @@ def run(args):
     trainer.save_model(os.path.join("/tmp", args.model_name))
 
     # Save the model to GCS
-    if args.job_dir:
+    if args.gs_dir:
         utils.save_model(args)
     else:
         print(f"Saved model files at {os.path.join('/tmp', args.model_name)}")

@@ -70,7 +70,7 @@ def get_args():
 
     # Saved model arguments
     args_parser.add_argument(
-        "--job-dir",
+        "--gs-dir",
         default=os.getenv("AIP_MODEL_DIR"),
         help="GCS location to export models",
     )

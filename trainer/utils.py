@@ -4,6 +4,8 @@ import pandas as pd
 from datasets import Dataset, DatasetDict
 from transformers import AutoTokenizer
 
+from google.cloud import storage
+
 from trainer import metadata
 
 
@@ -65,10 +67,10 @@ def save_model(args):
       args: contains name for saved model.
     """
     scheme = "gs://"
-    if args.job_dir.startswith(scheme):
-        job_dir = args.job_dir.split("/")
-        bucket_name = job_dir[2]
-        object_prefix = "/".join(job_dir[3:]).rstrip("/")
+    if args.gs_dir.startswith(scheme):
+        gs_dir = args.gs_dir.split("/")
+        bucket_name = gs_dir[2]
+        object_prefix = "/".join(gs_dir[3:]).rstrip("/")
 
         if object_prefix:
             model_path = "{}/{}".format(object_prefix, args.model_name)
@@ -90,5 +92,5 @@ def save_model(args):
     else:
         print(f"Saved model files at {os.path.join('/tmp', args.model_name)}")
         print(
-            "To save model files in GCS bucket, please specify job_dir starting with gs://"
+            "To save model files in GCS bucket, please specify gs_dir starting with gs://"
         )

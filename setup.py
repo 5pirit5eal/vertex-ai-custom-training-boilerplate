@@ -1,6 +1,14 @@
 from setuptools import find_packages, setup
 
-REQUIRED_PACKAGES = ["transformers", "datasets", "tqdm", "cloudml-hypertune"]
+REQUIRED_PACKAGES = [
+    "google-cloud-storage",
+    "transformers[torch]",
+    "datasets",
+    "tqdm",
+    "cloudml-hypertune",
+    "scikit-learn>=1.2.2",
+    # "gcsfs",
+]
 
 setup(
     name="trainer",

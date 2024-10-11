@@ -9,23 +9,25 @@ set +o allexport
 gsutil mb -l $REGION -p $PROJECT_ID gs://$BUCKET_NAME || true
 
 # Create the package
-python3 setup.py sdist --format=gztar
+python -m pip install --upgrade pip setuptools wheel
+python setup.py sdist --format=gztar
 
 # Upload the package
-gsutil cp dist/trainer-0.1.tar.gz $BUCKET_URI/trainer-0.1.tar.gz
+gsutil cp dist/trainer-0.1.tar.gz gs://$BUCKET_NAME/trainer-0.1.tar.gz
 
-gsutil ls -l $BUCKET_URI/trainer-0.1.tar.gz
+gsutil ls -l gs://$BUCKET_NAME/trainer-0.1.tar.gz
 
-if $1 = "local"; then
+if [ $1 = "local" ]; then
     gcloud ai custom-jobs local-run \
-        --executor-image-uri="python:3.12" \
-        --local-package-path=./trainer \
-        --python-module=trainer.task.py \
-        --output-image-uri=$TRAIN_DOCKER_IMAGE_URI \
-        -- \ # add arguments to be passed to task.py below here
-        --job-dir=gs://$BUCKET_NAME/
-if $1 = "gcloud"; then
+        --executor-image-uri="europe-docker.pkg.dev/vertex-ai/training/pytorch-gpu.1-13.py310:latest" \
+        --local-package-path=. \
+        --python-module=trainer.task \
+        --output-image-uri="pytorch_training_$APP_NAME" \
+        -- \
+        --gs-dir="gs://$BUCKET_NAME/python-example/"
+elif [ $1 = "gcloud" ]; then
     gcloud ai custom-jobs create \
         --region=$REGION \
         --display-name=$JOB_NAME \
-        --config=config.yaml \
+        --config=config.yaml ;
+fi
