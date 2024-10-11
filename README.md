@@ -9,19 +9,18 @@ You can structure your training application in any way you like. However, the [f
 The following python_package directory structure shows a sample packaging approach.
 
 ```text
-├── python_package
-│   ├── setup.py
-│   └── trainer
-│       ├── __init__.py
-│       ├── experiment.py
-│       ├── metadata.py
-│       ├── model.py
-│       ├── task.py
-│       └── utils.py
-└── pytorch-text-sentiment-classification-custom-train-deploy.ipynb    --> This notebook
+├── setup.py
+├── trainer
+│   ├── __init__.py
+│   ├── experiment.py
+│   ├── metadata.py
+│   ├── model.py
+│   ├── task.py
+│   └── utils.py
+└── run.sh
 ```
 
-Main project directory contains your setup.py file with the dependencies.
+Root directory contains your `setup.py` file with the dependencies.
 Inside trainer directory:
 
 - `task.py` - Main application module initializes and parse task arguments (hyperparameters). It also serves as an entry point to the trainer.
@@ -30,8 +29,10 @@ Inside trainer directory:
 - `metadata.py` - Defines the metadata for classification tasks such as predefined model, dataset name and target labels.
 - `utils.py` - Includes utility functions such as those used for reading data, saving models to Cloud Storage buckets.
 
-The files setup.cfg and setup.py include the instructions for installing the package into the operating environment of the Docker image.
+The files setup.cfg and setup.py include the instructions for installing the `trainer` package into the operating environment of the Docker image.
 
-The file trainer/task.py is the Python script for executing the custom training job.
+The file `trainer/task.py` is the Python script for executing the custom training job.
+
+The file `run.sh` is the main execution script using gcloud to create the training job.
 
 Note: When referred to the file in the worker pool specification, the file suffix(.py) is dropped and the directory slash is replaced with a dot(trainer.task).
