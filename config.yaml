@@ -19,6 +19,7 @@ workerPoolSpecs:
       args:
         - --num-epochs=2 # Replace with your training arguments
         - --model-name=pytorch-cloud-example
+        - --gs-dir=gs://<your_bucket>/python-example/
 scheduling:
   timeout: 14400s # Replace with the desired timeout in seconds
   
