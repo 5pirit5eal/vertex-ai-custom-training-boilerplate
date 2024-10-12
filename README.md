@@ -2,16 +2,18 @@
 
 Example on how to use vertex ai custom training for a pytorch model. Based on <https://cloud.google.com/vertex-ai/docs/training/containers-overview#how_training_with_containers_works> and <https://github.com/GoogleCloudPlatform/vertex-ai-samples/blob/main/notebooks/official/training/pytorch-text-sentiment-classification-custom-train-deploy.ipynb>.
 
-### Prerequisites
+## Prerequisites
 
 Be sure to have done the following before attempting to use this example:
 
-1. Setup a google cloud account, billing and project
+1. Setup a google cloud account, billing, project and artefact registry docker repository
 2. Ensure the correct APIs are enabled (e.g. vertex ai)
 3. Install `gcloud` CLI
 4. Create Application Default Credentials with `gcloud auth application-default login`
+5. Configure google cloud docker authentication `gcloud auth configure-docker`
+6. Adapt `.env` and `config.yaml` to your specifics based on the above topics
 
-### Package layout
+## Package layout
 
 You can structure your training application in any way you like. However, the [following structure](https://cloud.google.com/vertex-ai/docs/training/create-python-pre-built-container#structure) is commonly used in Vertex AI samples, and having your project organized similarly can make it easier for you to follow the samples.
 

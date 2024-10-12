@@ -60,7 +60,7 @@ def load_data(args):
     return train_dataset, test_dataset
 
 
-def save_model(args):
+def save_model(args, project_id):
     """Saves the model to Google Cloud Storage or local file system
 
     Args:
@@ -77,7 +77,7 @@ def save_model(args):
         else:
             model_path = "{}".format(args.model_name)
 
-        bucket = storage.Client().bucket(bucket_name)
+        bucket = storage.Client(project=project_id).bucket(bucket_name)
         local_path = os.path.join("/tmp", args.model_name)
         files = [
             f

@@ -1,0 +1,24 @@
+# Based on https://cloud.google.com/vertex-ai/docs/reference/rest/v1/CustomJobSpec
+workerPoolSpecs:
+  - machineSpec:
+      machineType: n1-standard-4 # Replace with the desired machine type
+      acceleratorType: NVIDIA_TESLA_T4 # Replace with the desired accelerator type
+      acceleratorCount: 1 # Replace with the desired number of accelerators
+    replicaCount: 1 # Replace with the desired number of replicas
+    pythonPackageSpec:
+      executorImageUri: europe-docker.pkg.dev/vertex-ai/training/pytorch-gpu.1-13.py310:latest # Replace with the desired PyTorch container image URI
+      packageUris:
+        - gs://<your_bucket>/trainer-0.1.tar.gz # Replace with the path to your training package in Cloud Storage
+      pythonModule: trainer.task # Replace with the name of your training script's module
+      # containerSpec: # Replace packageUris if you're using a custom container image
+      #   imageUri: gcr.io/ucaip-test/ucaip-training-test
+      #   args:
+      #   - port=8500
+      #   command:
+      #   - start
+      args:
+        - --num-epochs=2 # Replace with your training arguments
+        - --model-name=pytorch-cloud-example
+scheduling:
+  timeout: 14400s # Replace with the desired timeout in seconds
+  

@@ -79,6 +79,11 @@ def get_args():
         default="finetuned-bert-classifier",
         help="The name of your saved model",
     )
+    args_parser.add_argument(
+        "--project-id",
+        default=os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCLOUD_PROJECT")),
+        help="The GCP project id to fall back to if not configured by the environment.",
+    )
 
     return args_parser.parse_args()
 

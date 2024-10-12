@@ -13,6 +13,8 @@ from transformers import (
 
 from trainer import model, metadata, utils
 
+from google.auth import default
+
 
 class HPTuneCallback(TrainerCallback):
     """
@@ -97,6 +99,11 @@ def run(args):
     Args:
       args: experiment parameters.
     """
+    # Check runtime
+    _, project_id = default()
+    if not project_id:
+        project_id = args.project_id
+
     # Open our dataset
     train_dataset, test_dataset = utils.load_data(args)
 
@@ -117,9 +124,10 @@ def run(args):
 
     # Save the model to GCS
     if args.gs_dir:
-        utils.save_model(args)
+        utils.save_model(args, project_id)
     else:
         print(f"Saved model files at {os.path.join('/tmp', args.model_name)}")
         print(
-            f"To save model files in GCS bucket, please specify job_dir starting with gs://"
+            "To save model files in GCS bucket, "
+            "please specify job_dir starting with gs://"
         )

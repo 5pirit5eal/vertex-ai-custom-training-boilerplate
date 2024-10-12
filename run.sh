@@ -24,10 +24,11 @@ if [ $1 = "local" ]; then
         --python-module=trainer.task \
         --output-image-uri="pytorch_training_$APP_NAME" \
         -- \
-        --gs-dir="gs://$BUCKET_NAME/python-example/"
-elif [ $1 = "gcloud" ]; then
+        --gs-dir="gs://$BUCKET_NAME/python-example/" \
+        --project-id=$PROJECT_ID
+elif [ $1 = "cloud" ]; then
     gcloud ai custom-jobs create \
         --region=$REGION \
-        --display-name=$JOB_NAME \
-        --config=config.yaml ;
+        --display-name="pytorch_cloud_training_$APP_NAME" \
+        --config="config.yaml"
 fi
