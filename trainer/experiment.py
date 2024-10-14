@@ -104,6 +104,8 @@ def run(args):
     if not project_id:
         project_id = args.project_id
 
+    print(f"Saving files to GCS after training: {args.gs_dir}")
+
     # Open our dataset
     train_dataset, test_dataset = utils.load_data(args)
 

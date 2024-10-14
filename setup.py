@@ -7,7 +7,6 @@ REQUIRED_PACKAGES = [
     "tqdm",
     "cloudml-hypertune",
     "scikit-learn>=1.2.2",
-    # "gcsfs",
 ]
 
 setup(

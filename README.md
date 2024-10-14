@@ -8,7 +8,7 @@ Be sure to have done the following before attempting to use this example:
 
 1. Setup a google cloud account, billing, project and artefact registry docker repository
 2. Ensure the correct APIs are enabled (e.g. vertex ai)
-3. Install `gcloud` CLI
+3. Install `gcloud` CLI (and python >=3.10)
 4. Create Application Default Credentials with `gcloud auth application-default login`
 5. Configure google cloud docker authentication `gcloud auth configure-docker`
 6. Adapt `.env` and `config.yaml` to your specifics based on the above topics
@@ -47,3 +47,52 @@ The file `trainer/task.py` is the Python script for executing the custom trainin
 The file `run.sh` is the main execution script using gcloud to create the training job.
 
 Note: When referred to the file in the worker pool specification, the file suffix(.py) is dropped and the directory slash is replaced with a dot(trainer.task).
+
+## Installation
+
+To install the package use:
+
+```bash
+python -m venv .venv --prompt pytorch-example
+source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -e .
+```
+
+Alternatively you can just start the script with:
+
+```bash
+bash run.sh local
+```
+
+for local deployment, or
+
+```bash
+bash run.sh cloud
+```
+
+for google cloud deployment.
+
+## Deployment
+
+To deploy the model on Vertex AI:
+
+```bash
+bash deploy.sh cloud
+```
+
+for google cloud deployment.
+
+```bash
+bash deploy.sh local
+```
+
+for local deployment.
+
+## Prediction
+
+To predict on Vertex AI:
+
+```bash
+bash predict.sh cloud "input text"
+```
