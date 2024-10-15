@@ -10,11 +10,12 @@ RUN pip3 install transformers[torch]
 
 FROM base AS serve-gcs
 
-ENV APP_NAME=pytorch-cloud-example
+WORKDIR /home/model-server
+
 # copy model artifacts, custom handler and other dependencies
 COPY ./predictor/custom_handler.py ./
 COPY ./predictor/index_to_name.json ./
-COPY ./predictor/$APP_NAME/ ./
+COPY ./predictor/pytorch-cloud-example/ ./
 COPY ./predictor/config.properties ./
 
 
