@@ -8,14 +8,17 @@ set +o allexport
 # Create a Google Cloud Storage bucket if it doesn't exist yet
 gsutil mb -l $REGION -p $PROJECT_ID gs://$BUCKET_NAME || true
 
+# Upload the data to gcs from kaggle
+uvx kaggle datasets download -d iammustafatz/diabetes-prediction-dataset -f diabetes.csv
+gsutil cp diabetes.csv gs://$BUCKET_NAME
+
 # Create the package
-python -m pip install --upgrade pip setuptools wheel
-python setup.py sdist --format=gztar
+uv build
 
 # Upload the package
-gsutil cp dist/trainer-0.1.tar.gz gs://$BUCKET_NAME/trainer-0.1.tar.gz
+gsutil cp dist/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz gs://$BUCKET_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
 
-gsutil ls -l gs://$BUCKET_NAME/trainer-0.1.tar.gz
+gsutil ls -l gs://$BUCKET_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
 
 if [ $1 = "local" ]; then
     gcloud ai custom-jobs local-run \

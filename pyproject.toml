@@ -1,0 +1,25 @@
+[project]
+name = "vertex-ai-custom-training-xgboost-boilerplate"
+version = "0.1.0"
+description = "A template for an xgboost example based with vertex ai custom training."
+authors = [{ name = "5pirit5eal" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-storage",
+    "xgboost",
+    "tqdm",
+    "cloudml-hypertune",
+    "polars>=1.9.0",
+    "afire>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "bandit", "black", "pytest", "mypy", "pytest-cov"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["trainer"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

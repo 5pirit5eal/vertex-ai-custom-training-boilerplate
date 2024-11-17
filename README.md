@@ -1,6 +1,6 @@
 # Training, tuning and deploying a PyTorch text sentiment classification model on Vertex AI
 
-Example on how to use vertex ai custom training for a pytorch model. Based on <https://cloud.google.com/vertex-ai/docs/training/containers-overview#how_training_with_containers_works> and <https://github.com/GoogleCloudPlatform/vertex-ai-samples/blob/main/notebooks/official/training/pytorch-text-sentiment-classification-custom-train-deploy.ipynb>.
+Example on how to use vertex ai custom training for a xgboost model. Based on <https://cloud.google.com/vertex-ai/docs/training/containers-overview#how_training_with_containers_works>.
 
 ## Prerequisites
 
@@ -12,6 +12,7 @@ Be sure to have done the following before attempting to use this example:
 4. Create Application Default Credentials with `gcloud auth application-default login`
 5. Configure google cloud docker authentication `gcloud auth configure-docker`
 6. Adapt `.env` and `config.yaml` to your specifics based on the above topics
+7. Download the csv data of your choice (e.g. dataset to predict diabetes: `diabetes.csv`)
 
 ## Package layout
 
@@ -20,7 +21,7 @@ You can structure your training application in any way you like. However, the [f
 The following python_package directory structure shows a sample packaging approach.
 
 ```text
-├── setup.py
+├── pyproject.toml
 ├── trainer
 │   ├── __init__.py
 │   ├── experiment.py
@@ -28,7 +29,10 @@ The following python_package directory structure shows a sample packaging approa
 │   ├── model.py
 │   ├── task.py
 │   └── utils.py
-└── run.sh
+├── deploy.sh
+├── predict.sh
+├── run.sh
+└── README.md
 ```
 
 Root directory contains your `setup.py` file with the dependencies.

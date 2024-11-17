@@ -3,6 +3,7 @@
 TASK_TYPE = "classification"
 
 # Dataset paths
+DATA_URL = "kaggle datasets download -d iammustafatz/diabetes-prediction-dataset"
 
 TRAIN_DATA = "gs://cloud-samples-data/ai-platform-unified/datasets/text/happydb/happydb_train.csv"
 TEST_DATA = (

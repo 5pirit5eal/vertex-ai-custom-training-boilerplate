@@ -37,11 +37,12 @@ def preprocess_function(examples):
     return result
 
 
-def load_data(args):
-    """Loads the data into two different data loaders. (Train, Test)
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Loads the data into two different data loaders.
 
-    Args:
-        args: arguments passed to the python script
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            train_dataset, test_dataset as dataframes
     """
     # dataset loading repeated here to make this cell idempotent
     # since we are over-writing datasets variable
