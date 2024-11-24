@@ -1,18 +1,16 @@
-from transformers import AutoModelForSequenceClassification
+import logging
+from xgboost import XGBClassifier
 
 from trainer import metadata
 
 
-def create(num_labels):
-    """create the model by loading a pretrained model or define your
-    own
-
-    Args:
-      num_labels: number of target labels
-    """
-    # Create the model, loss function, and optimizer
-    model = AutoModelForSequenceClassification.from_pretrained(
-        metadata.PRETRAINED_MODEL_NAME, num_labels=num_labels
+def create(**kwargs):
+    """Create the model by loading a pretrained model or define your own."""
+    # Create the model with your preprocessing pipeline as part of the model
+    # NOTE: This could include one-hot encoding or feature crosses
+    logging.info("Creating model...")
+    model = XGBClassifier(
+        **kwargs, objective=metadata.OBJECTIVE, eval_metric=metadata.EVAL_METRIC
     )
 
     return model

@@ -1,97 +1,106 @@
+import json
 import os
+import logging
 
 import pandas as pd
-from datasets import Dataset, DatasetDict
-from transformers import AutoTokenizer
+from xgboost import XGBModel
 
-from google.cloud import storage
+from sklearn.model_selection import train_test_split
 
 from trainer import metadata
 
 
-def preprocess_function(examples):
-    tokenizer = AutoTokenizer.from_pretrained(
-        metadata.PRETRAINED_MODEL_NAME,
-        use_fast=True,
-    )
+def preprocess_function(
+    data: pd.DataFrame, labels: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Preprocesses the data and labels.
 
-    # Tokenize the texts
-    tokenizer_args = (examples["text"],)
-    result = tokenizer(
-        *tokenizer_args,
-        padding="max_length",
-        max_length=metadata.MAX_SEQ_LENGTH,
-        truncation=True,
-    )
-
-    # We can extract this automatically but the unique() method of the dataset
-    # is not reporting the label -1 which shows up in the pre-processing
-    # hence the additional -1 term in the dictionary
-
-    label_to_id = metadata.TARGET_LABELS
-
-    # Map labels to IDs (not necessary for GLUE tasks)
-    if label_to_id is not None and "label" in examples:
-        result["label"] = [label_to_id[l] for l in examples["label"]]
-
-    return result
-
-
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Loads the data into two different data loaders.
+    Args:
+        data (pd.DataFrame): The data to preprocess.
+        labels (pd.DataFrame): The labels to preprocess.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]:
-            train_dataset, test_dataset as dataframes
+        tuple[pd.DataFrame, pd.DataFrame]: The preprocessed data and labels.
     """
-    # dataset loading repeated here to make this cell idempotent
-    # since we are over-writing datasets variable
+    # NOTE: Implement your data cleaning and non-model preprocessing here
+    return data, labels
 
-    df_train = pd.read_csv(metadata.TRAIN_DATA)
-    df_test = pd.read_csv(metadata.TEST_DATA)
 
-    dataset = DatasetDict(
-        {"train": Dataset.from_pandas(df_train), "test": Dataset.from_pandas(df_test)}
+def load_data(
+    gs_dir: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame]]:
+    """Loads the data from Google Cloud Storage FUSE or local file system and
+    returns the train and test datasets.
+
+    Args:
+        gs_dir (str): The directory to save the split to.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame, tuple[pd.DataFrame, pd.DataFrame]]:
+            train_data and labels as dataframes, and eval_tuple
+    """
+    logging.info("Creating training data and labels")
+
+    df = pd.read_csv(metadata.DATA)
+
+    df_data = df.drop(columns=["diabetes"])
+    df_labels = df["diabetes"]
+
+    df_data_processed, df_labels_processed = preprocess_function(df_data, df_labels)
+
+    train_data, test_data, train_labels, test_labels = train_test_split(
+        df_data_processed,
+        df_labels_processed,
+        test_size=0.2,
+        random_state=7,
     )
 
-    dataset = dataset.map(preprocess_function, batched=True, load_from_cache_file=True)
+    # Concat labels and data
+    train_df = pd.concat([train_data, train_labels], axis=1)
+    test_df = pd.concat([test_data, test_labels], axis=1)
 
-    train_dataset, test_dataset = dataset["train"], dataset["test"]
+    # save the preprocessed data and labels
+    train_df.to_csv(os.path.join(gs_dir, "train_data.csv"), index=False)
+    test_df.to_csv(os.path.join(gs_dir, "test_data.csv"), index=False)
 
-    return train_dataset, test_dataset
+    return train_data, train_labels, (test_data, test_labels)
 
 
-def save_model(args, project_id):
+def convert_gs_to_gcs(gs_dir: str):
+    gs_prefix = "gs://"
+    gcs_prefix = "/gcs/"
+    if gs_dir.startswith(gs_prefix):
+        gs_dir = gs_dir.replace(gs_prefix, gcs_prefix)
+        if not os.path.isdir(os.path.split(gs_dir)[0]):
+            os.makedirs(os.path.split(gs_dir)[0])
+
+    return gs_dir
+
+
+def save_model(
+    model: XGBModel,
+    gs_dir: str,
+    model_name: str,
+):
     """Saves the model to Google Cloud Storage or local file system
 
     Args:
-      args: contains name for saved model.
+        model (xgb.XGBClassifier): The model to save.
+        gs_dir (str): The directory to save the model to.
+        model_name (str): The name of the model.
     """
-    scheme = "gs://"
-    if args.gs_dir.startswith(scheme):
-        gs_dir = args.gs_dir.split("/")
-        bucket_name = gs_dir[2]
-        object_prefix = "/".join(gs_dir[3:]).rstrip("/")
-
-        if object_prefix:
-            model_path = "{}/{}".format(object_prefix, args.model_name)
-        else:
-            model_path = "{}".format(args.model_name)
-
-        bucket = storage.Client(project=project_id).bucket(bucket_name)
-        local_path = os.path.join("/tmp", args.model_name)
-        files = [
-            f
-            for f in os.listdir(local_path)
-            if os.path.isfile(os.path.join(local_path, f))
-        ]
-        for file in files:
-            local_file = os.path.join(local_path, file)
-            blob = bucket.blob("/".join([model_path, file]))
-            blob.upload_from_filename(local_file)
-        print(f"Saved model files in gs://{bucket_name}/{model_path}")
-    else:
-        print(f"Saved model files at {os.path.join('/tmp', args.model_name)}")
-        print(
-            "To save model files in GCS bucket, please specify gs_dir starting with gs://"
+    if gs_dir.startswith("/gcs/"):
+        gcs_model_path = os.path.join(gs_dir, model_name, "model.bst")
+        logging.info("Saving model artifacts to %s", gcs_model_path)
+        model.save_model(gcs_model_path)
+        logging.info(
+            "Saving metrics to %s/%s/metrics.json",
+            gs_dir,
+            model_name,
+            extra={"json_fields": model.eval_results()},
         )
+        gcs_metrics_path = os.path.join(gs_dir, model_name, "metrics.json")
+        with open(gcs_metrics_path, "w") as f:
+            f.write(json.dumps(model.eval_results()))
+    else:
+        model.save_model(f"~/{model_name}/model.bst")

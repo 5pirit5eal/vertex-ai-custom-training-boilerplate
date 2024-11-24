@@ -1,29 +1,17 @@
-# Task type can be either 'classification', 'regression', or 'custom'.
-# This is based on the target feature in the dataset.
-TASK_TYPE = "classification"
+import os
+from sklearn.metrics import accuracy_score
 
-# Dataset paths
+# Data URL for FYI
 DATA_URL = "kaggle datasets download -d iammustafatz/diabetes-prediction-dataset"
 
-TRAIN_DATA = "gs://cloud-samples-data/ai-platform-unified/datasets/text/happydb/happydb_train.csv"
-TEST_DATA = (
-    "gs://cloud-samples-data/ai-platform-unified/datasets/text/happydb/happydb_test.csv"
-)
+if os.getenv("BUCKET_NAME") is None:
+    raise ValueError("BUCKET_NAME environment variable is not set")
+
+DATA = "/gcs/" + os.getenv("BUCKET_NAME", "") + "/data/diabetes-prediction-dataset.csv"
 
 # pre-trained model name
 PRETRAINED_MODEL_NAME = "bert-base-cased"
 
-# List of the class values (labels) in a classification dataset.
-TARGET_LABELS = {
-    "leisure": 0,
-    "exercise": 1,
-    "enjoy_the_moment": 2,
-    "affection": 3,
-    "achievement": 4,
-    "nature": 5,
-    "bonding": 6,
-}
-
-
-# maximum sequence length
-MAX_SEQ_LENGTH = 128
+# Non-tunable model parameters
+OBJECTIVE = ("binary:logistic",)
+EVAL_METRIC = ["logloss", "aucpr", accuracy_score]

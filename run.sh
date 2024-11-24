@@ -9,29 +9,28 @@ set +o allexport
 gsutil mb -l $REGION -p $PROJECT_ID gs://$BUCKET_NAME || true
 
 # Upload the data to gcs from kaggle
-uvx kaggle datasets download -d iammustafatz/diabetes-prediction-dataset -f diabetes.csv
-gsutil cp diabetes.csv gs://$BUCKET_NAME
+gsutil cp archive/diabetes_prediction_dataset.csv gs://$BUCKET_NAME/data/
 
 # Create the package
 uv build
 
 # Upload the package
-gsutil cp dist/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz gs://$BUCKET_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
+gsutil cp dist/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz gs://$BUCKET_NAME/$APP_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
 
-gsutil ls -l gs://$BUCKET_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
+gsutil ls -l gs://$BUCKET_NAME/$APP_NAME/vertex_ai_custom_training_xgboost_boilerplate-0.1.0.tar.gz
 
 if [ $1 = "local" ]; then
     gcloud ai custom-jobs local-run \
-        --executor-image-uri="europe-docker.pkg.dev/vertex-ai/training/pytorch-gpu.1-13.py310:latest" \
+        --executor-image-uri=$TRAIN_DOCKER_IMAGE_URI \
         --local-package-path=. \
         --python-module=trainer.task \
-        --output-image-uri="pytorch_training_$APP_NAME" \
+        --output-image-uri="xgboost_$APP_NAME" \
         -- \
-        --gs-dir="gs://$BUCKET_NAME/python-example/" \
-        --project-id=$PROJECT_ID
+        --gs-dir="gs://$BUCKET_NAME/$APP_NAME}/" \
+        --model_name=$APP_NAME
 elif [ $1 = "cloud" ]; then
     gcloud ai custom-jobs create \
         --region=$REGION \
-        --display-name="pytorch_cloud_training_$APP_NAME" \
+        --display-name="xgboost_cloud_training_$APP_NAME" \
         --config="config.yaml"
 fi
