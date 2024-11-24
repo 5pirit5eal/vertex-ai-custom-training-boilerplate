@@ -2,17 +2,20 @@ import os
 from typing import Literal
 import logging
 
-import hypertune
-import numpy as np
+import hypertune  # type: ignore[import-untyped]
 import xgboost as xgb
-from google.auth import default
 
 from xgboost import XGBClassifier
 
 from trainer import model, utils
 
 
-def evaluate(xgb_model: XGBClassifier):
+def evaluate(xgb_model: XGBClassifier) -> None:
+    """Evaluate the model.
+
+    Args:
+        xgb_model (XGBClassifier): The model to evaluate.
+    """
     logging.info("Getting eval results...")
     eval_results = xgb_model.eval_result()
     logging.info(
@@ -27,7 +30,6 @@ def evaluate(xgb_model: XGBClassifier):
         hyperparameter_metric_tag="accuracy_score",
         metric_value=eval_results["validation_1"]["accuracy_score"][-1],
     )
-    return eval_results
 
 
 def run(
@@ -69,9 +71,12 @@ def run(
 
     # Convert the gs_dir to google cloud fuse
     gs_dir = utils.convert_gs_to_gcs(gs_dir)
+    model_id = utils.generate_random_id()
 
     # Open our dataset
-    train_data, train_labels, eval_set = utils.load_data(gs_dir=gs_dir)
+    train_data, train_labels, eval_set = utils.load_data(
+        gs_dir=gs_dir, model_name=model_name, model_id=model_id
+    )
 
     xgb_model = model.create(
         n_estimators=n_estimators,
@@ -90,4 +95,6 @@ def run(
     evaluate(xgb_model=xgb_model)
 
     # Save the model to GCS
-    utils.save_model(model=xgb_model, gs_dir=gs_dir, model_name=model_name)
+    utils.save_model(
+        model=xgb_model, gs_dir=gs_dir, model_name=model_name, model_id=model_id
+    )

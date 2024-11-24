@@ -1,5 +1,5 @@
 import os
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score  # type: ignore[import-untyped]
 
 # Data URL for FYI
 DATA_URL = "kaggle datasets download -d iammustafatz/diabetes-prediction-dataset"

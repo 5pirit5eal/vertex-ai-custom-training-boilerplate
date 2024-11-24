@@ -1,6 +1,6 @@
 import os
 import logging
-from afire import Fire
+from afire import Fire  # type: ignore[import-untyped]
 
 from trainer import experiment
 from google.cloud.logging import Client
