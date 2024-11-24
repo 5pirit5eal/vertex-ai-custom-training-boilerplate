@@ -4,18 +4,21 @@ version = "0.1.0"
 description = "A template for an xgboost example based with vertex ai custom training."
 authors = [{ name = "5pirit5eal" }]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
-    "google-cloud-storage",
-    "xgboost",
-    "tqdm",
-    "cloudml-hypertune",
     "polars>=1.9.0",
     "afire>=1.1.0",
     "google-cloud-logging>=3.11.3",
     "scikit-learn>=1.5.2",
     "pandas>=2.2.3",
-    "google-cloud-aiplatform>=1.73.0",
+    "xgboost>=2.1.2",
+    "google-cloud-storage>=2.18.2",
+    "cloudml-hypertune>=0.1.0.dev6",
+    "joblib>=1.4.2",
+    "pandas-stubs>=2.2.3.241009",
+    "fsspec>=2024.10.0",
+    "gcsfs>=2024.10.0",
+    "matplotlib>=3.9.2",
 ]
 
 [project.optional-dependencies]

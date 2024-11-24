@@ -57,10 +57,7 @@ Note: When referred to the file in the worker pool specification, the file suffi
 To install the package use:
 
 ```bash
-python -m venv .venv --prompt pytorch-example
-source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -e .
+uv sync --extra dev --reinstall
 ```
 
 Alternatively you can just start the script with:

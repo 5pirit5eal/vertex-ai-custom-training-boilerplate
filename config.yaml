@@ -17,7 +17,7 @@ workerPoolSpecs:
       #   command:
       #   - start
       args:
-        - --num-epochs=2 # Replace with your training arguments
+        - --project_id=2 # Replace with your training arguments
         - --model-name=diabetes-classifier
         - --gs-dir=gs://rschulze-sandbox-diabetes-prediction/diabetes-classifier/
 scheduling:
