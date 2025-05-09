@@ -1,8 +1,6 @@
 import argparse
 import os
 
-from trainer import experiment
-
 
 def get_args():
     """Define the task arguments with the default values.
@@ -10,7 +8,9 @@ def get_args():
     Returns:
         experiment parameters
     """
-    args_parser = argparse.ArgumentParser()
+    args_parser = argparse.ArgumentParser(
+        description="AutoGluon Tabular Predictor"
+    )
 
     # Experiment arguments
     args_parser.add_argument(
