@@ -3,7 +3,6 @@ from typing import Literal
 
 import click
 import msgspec
-import logging
 
 
 class Hyperparameters(msgspec.Struct):
@@ -76,7 +75,7 @@ class Config(msgspec.Struct):
     "--log-level",
     help="Logging level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
-    default=os.getenv("CLOUD_ML_LOG_LEVEL", "INFO"),
+    default=os.getenv("CLOUD_ML_LOG_LEVEL", "DEBUG"),
 )
 @click.option(
     "--data-format",
@@ -152,5 +151,4 @@ class Config(msgspec.Struct):
 )
 def load_config(**kwargs) -> Config:
     """Loads the metadata from environment variables including preconfigured vertex ai custom training variables."""
-    print(os.environ)
-    return msgspec.convert(kwargs, Config, from_attributes=True)
+    return msgspec.convert(kwargs, Config, strict=False)

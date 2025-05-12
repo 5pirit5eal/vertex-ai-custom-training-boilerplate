@@ -3,22 +3,27 @@ import os
 import logging
 from autogluon.tabular import TabularPredictor
 
-from config import Config, load_config
-from data import convert_gs_to_gcs, load_data, write_df, write_json
+from trainer.config import Config, load_config
+from trainer.data import convert_gs_to_gcs, load_data, write_df, write_json
 
 
 def main():
-    # Load the training data.
-    config: Config = load_config()
-
     logging.basicConfig(
-        level=logging.getLevelNamesMapping().get(
-            config.log_level, logging.INFO
-        ),
-        stream=sys.stdout,
+        level=logging.DEBUG,
+        handlers=[logging.StreamHandler(sys.stdout)],
+        format="%(message)s",
+    )
+    # Load the training data.
+    logging.info("Loading config...")
+    config: Config = load_config.main(standalone_mode=False)
+    logging.info(f"Config loaded: {config}")
+
+    logging.getLogger().setLevel(
+        logging.getLevelNamesMapping().get(config.log_level, logging.DEBUG)
     )
 
     # Load the data
+    logging.info("Loading data...")
     train_df, val_df, test_df = load_data(config)
 
     # Create a TabularPredictor.
@@ -32,6 +37,7 @@ def main():
     )
 
     # Fit the model
+    logging.info("Fitting model...")
     predictor.fit(
         train_data=train_df,
         tuning_data=val_df,
@@ -41,6 +47,7 @@ def main():
     )
 
     # Predict on the test data
+    logging.info("Predicting on test data and writing results...")
     if test_df is not None:
         test_predictions = predictor.predict_proba(test_df)
         # Write the predictions to a CSV file in GCS

@@ -1,4 +1,5 @@
 import json
+import logging
 from fnmatch import fnmatch
 from typing import Literal
 
@@ -53,12 +54,12 @@ def load_split_df(
             raise ValueError(f"Invalid split: {split}")
 
     if config.data_format == "bigquery":
-        print(f"Loading {split} data from BigQuery")
+        logging.info(f"Loading {split} data from BigQuery")
         client = get_bigquery_client(config)
         query = f"SELECT * FROM `{data_uri}` WHERE split = '{split}'"
         df = client.query(query).to_dataframe()
     elif config.data_format == "csv":
-        print(f"Loading {split} csv data from GCS")
+        logging.info(f"Loading {split} csv data from GCS")
         # Load data from GCS
         try:
             uri = convert_gs_to_gcs(data_uri)
@@ -67,7 +68,7 @@ def load_split_df(
         except Exception as e:
             df = load_wildcard_csv(data_uri)
     else:
-        print(f"Loading {split} jsonl data from GCS")
+        logging.info(f"Loading {split} jsonl data from GCS")
         raise ValueError(
             "JSONL format is not supported yet, and not used for Tabular Datasets."
         )

@@ -1,0 +1,43 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": "${command:pickArgs}"
+        },
+        {
+            "name": "Python: Train Model with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/trainer/src/trainer/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--project-id",
+                "adesso-gcc-rschulze-sandbox",
+                "--region",
+                "europe-west4",
+                "--data-format",
+                "csv",
+                "--train-data-uri",
+                "gs://adesso-gcc-rschulze-sandbox/train.csv",
+                "--model-export-uri",
+                "gs://adesso-gcc-rschulze-sandbox/model_output",
+                "--label",
+                "class",
+                "--presets",
+                "medium_quality",
+                "--time-limit",
+                "600",
+                "--log-level",
+                "DEBUG"
+            ]
+        }
+    ]
+}
