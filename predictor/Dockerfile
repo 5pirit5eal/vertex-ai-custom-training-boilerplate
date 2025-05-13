@@ -27,10 +27,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Use the final image without uv
 FROM python:3.12-slim-bookworm
 
+# Autogluon relies on libgomp1, which is not included in the slim image
+RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends libgomp1
+
 # Copy the application from the builder
 COPY --from=builder --chown=app:app /app /app
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Expose the port the app runs on.
+EXPOSE 8501
 
 ENTRYPOINT ["python", "/app/src/predictor/main.py"]

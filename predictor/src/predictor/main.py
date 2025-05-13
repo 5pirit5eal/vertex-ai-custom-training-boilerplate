@@ -27,13 +27,13 @@ from litestar.status_codes import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
 from predictor.utils import download_gcs_dir_to_local
 
 # Constants
-_PORT = 8501
+_PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
 GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
 
 
 # Model loading
-model_dir = os.getenv("model_path", "/model/")
+model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
 logging.info(f"Model directory passed by the user is: {model_dir}")
 if model_dir.startswith(GCS_URI_PREFIX):
     gcs_path = model_dir[len(GCS_URI_PREFIX) :]
@@ -46,15 +46,15 @@ if model_dir.startswith(GCS_URI_PREFIX):
 predictor = TabularPredictor.load(model_dir)
 
 
-@get("/ping")
+@get(os.getenv("AIP_HEALTH_ROUTE", "/ping"))
 async def ping() -> Response:
     return Response(content="pong", status_code=HTTP_200_OK)
 
 
-@post("/predict")
+@post(os.getenv("AIP_PREDICT_ROUTE", "/predict"))
 async def predict(request: Request) -> Response:
     try:
-        data = request.json()
+        data = await request.json()
         instances = data.get("instances", [])
         df_to_predict = pd.DataFrame(instances)
         predictions = predictor.predict(df_to_predict).tolist()
