@@ -1,98 +1,51 @@
-# Training, tuning and deploying a PyTorch text sentiment classification model on Vertex AI
+# Vertex AI Custom Training Boilerplate
 
-Example on how to use vertex ai custom training for a pytorch model. Based on <https://cloud.google.com/vertex-ai/docs/training/containers-overview#how_training_with_containers_works> and <https://github.com/GoogleCloudPlatform/vertex-ai-samples/blob/main/notebooks/official/training/pytorch-text-sentiment-classification-custom-train-deploy.ipynb>.
+This repository provides a boilerplate for creating custom training and prediction containers for use with Google Cloud's Vertex AI. It includes separate components for training and prediction, along with scripts to build and push Docker images to Google Artifact Registry.
 
-## Prerequisites
+## Project Structure
 
-Be sure to have done the following before attempting to use this example:
+- **build_and_push.sh**: A script to build and push Docker images for the `trainer` and `predictor` components to Google Artifact Registry.
 
-1. Setup a google cloud account, billing, project and artefact registry docker repository
-2. Ensure the correct APIs are enabled (e.g. vertex ai)
-3. Install `gcloud` CLI (and python >=3.10)
-4. Create Application Default Credentials with `gcloud auth application-default login`
-5. Configure google cloud docker authentication `gcloud auth configure-docker`
-6. Adapt `.env` and `config.yaml` to your specifics based on the above topics
+- **predictor/**: Contains the code and Dockerfile for the prediction service.
 
-## Package layout
+  - **src/predictor/**: Includes the main prediction logic and utility functions.
 
-You can structure your training application in any way you like. However, the [following structure](https://cloud.google.com/vertex-ai/docs/training/create-python-pre-built-container#structure) is commonly used in Vertex AI samples, and having your project organized similarly can make it easier for you to follow the samples.
+- **trainer/**: Contains the code and Dockerfile for the training service.
 
-The following python_package directory structure shows a sample packaging approach.
+  - **src/trainer/**: Includes the main training logic, configuration, and data handling.
 
-```text
-├── setup.py
-├── trainer
-│   ├── __init__.py
-│   ├── experiment.py
-│   ├── metadata.py
-│   ├── model.py
-│   ├── task.py
-│   └── utils.py
-└── run.sh
-```
+## Components
 
-Root directory contains your `setup.py` file with the dependencies.
-Inside trainer directory:
+### Trainer
 
-- `task.py` - Main application module initializes and parse task arguments (hyperparameters). It also serves as an entry point to the trainer.
-- `model.py` - Includes a function to create a model with a sequence classification head from a pre-trained model.
-- `experiment.py` - Runs the model training and evaluation experiment, and exports the final model.
-- `metadata.py` - Defines the metadata for classification tasks such as predefined model, dataset name and target labels.
-- `utils.py` - Includes utility functions such as those used for reading data, saving models to Cloud Storage buckets.
+The `trainer` component is responsible for running custom training jobs on Vertex AI. It includes:
 
-The files setup.cfg and setup.py include the instructions for installing the `trainer` package into the operating environment of the Docker image.
+- Configuration files for training.
 
-The file `trainer/task.py` is the Python script for executing the custom training job.
+- Data handling scripts.
 
-The file `run.sh` is the main execution script using gcloud to create the training job.
+- Main training logic.
 
-Note: When referred to the file in the worker pool specification, the file suffix(.py) is dropped and the directory slash is replaced with a dot(trainer.task).
+### Predictor
 
-## Installation
+The `predictor` component is responsible for serving predictions. It includes:
 
-To install the package use:
+- Main prediction logic.
 
-```bash
-python -m venv .venv --prompt pytorch-example
-source .venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -e .
-```
+- Utility functions for preprocessing and postprocessing.
 
-Alternatively you can just start the script with:
+## Usage
 
-```bash
-bash run.sh local
-```
+1. Modify the `trainer` and `predictor` components as needed for your use case.
 
-for local deployment, or
+2. Use the `build_and_push.sh` script to build and push Docker images:
 
-```bash
-bash run.sh cloud
-```
+   ```bash
+   ./build_and_push.sh <trainer|predictor> <PROJECT_ID> <REGION> <ARTIFACT_REGISTRY>
+   ```
 
-for google cloud deployment.
+   Replace `<PROJECT_ID>`, `<REGION>`, and `<ARTIFACT_REGISTRY>` with your Google Cloud project details.
 
-## Deployment
+## Notes
 
-To deploy the model on Vertex AI:
-
-```bash
-bash deploy.sh cloud
-```
-
-for google cloud deployment.
-
-```bash
-bash deploy.sh local
-```
-
-for local deployment.
-
-## Prediction
-
-To predict on Vertex AI:
-
-```bash
-bash predict.sh cloud "input text"
-```
+- The `trainer` component's README provides additional details about how Vertex AI mounts Cloud Storage buckets during training.

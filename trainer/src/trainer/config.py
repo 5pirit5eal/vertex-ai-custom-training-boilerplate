@@ -29,7 +29,7 @@ class Config(msgspec.Struct):
     tensorboard_log_uri: str | None
 
     # Model training variables
-    time_limit: int
+    time_limit: int | None
     label: str
     task_type: Literal["binary", "multiclass", "regression", "quantile"] | None
     eval_metric: str | None
@@ -152,6 +152,7 @@ class Config(msgspec.Struct):
             "good_quality",
             "high_quality",
             "best_quality",
+            "optimize_for_deployment",
         ]
     ),
 )
@@ -159,7 +160,7 @@ class Config(msgspec.Struct):
     "--time-limit",
     help="Time limit for the training job in seconds",
     type=int,
-    default=60 * 60 * 1,  # 1h in seconds
+    default=None,
 )
 def load_config(**kwargs) -> Config:
     """Loads the metadata from environment variables including preconfigured vertex ai custom training variables."""
