@@ -33,7 +33,7 @@ LOCAL_MODEL_DIR = "/tmp/model/"
 
 
 # Model loading
-model_dir = os.getenv("model_path", "/autogluon/models")
+model_dir = os.getenv("model_path", "/model/")
 logging.info(f"Model directory passed by the user is: {model_dir}")
 if model_dir.startswith(GCS_URI_PREFIX):
     gcs_path = model_dir[len(GCS_URI_PREFIX) :]
@@ -47,12 +47,12 @@ predictor = TabularPredictor.load(model_dir)
 
 
 @get("/ping")
-def ping() -> Response:
+async def ping() -> Response:
     return Response(content="pong", status_code=HTTP_200_OK)
 
 
 @post("/predict")
-def predict(request: Request) -> Response:
+async def predict(request: Request) -> Response:
     try:
         data = request.json()
         instances = data.get("instances", [])

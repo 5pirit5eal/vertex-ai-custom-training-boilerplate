@@ -26,7 +26,7 @@
                 "--data-format",
                 "csv",
                 "--train-data-uri",
-                "gs://adesso-gcc-rschulze-sandbox/train.csv",
+                "gs://adesso-gcc-rschulze-sandbox/model_output/dataset-7755988007680737280-tables-2025-05-12T13:55:33.621188Z/training-*",
                 "--model-export-uri",
                 "gs://adesso-gcc-rschulze-sandbox/model_output",
                 "--label",

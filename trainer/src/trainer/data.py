@@ -1,12 +1,13 @@
 import json
 import logging
+import os
 from fnmatch import fnmatch
 from typing import Literal
 
 import pandas as pd
 from google.cloud import bigquery, storage
 
-from config import Config
+from trainer.config import Config
 
 
 def get_bigquery_client(config: Config) -> bigquery.Client:
@@ -66,7 +67,7 @@ def load_split_df(
 
             df = pd.read_csv(uri)
         except Exception as e:
-            df = load_wildcard_csv(data_uri)
+            df = load_wildcard_csv(config, data_uri)
     else:
         logging.info(f"Loading {split} jsonl data from GCS")
         raise ValueError(
@@ -93,14 +94,14 @@ def load_wildcard_csv(config: Config, uri: str) -> pd.DataFrame:
     # Get the bucket name and prefix from the URI
     bucket_name, prefix = uri[5:].split("/", 1)
     bucket = client.bucket(bucket_name)
-    blobs: list[storage.Blob] = bucket.list_blobs(prefix=prefix)
+    blobs: list[storage.Blob] = bucket.list_blobs()
 
     # Load each CSV file into a DataFrame and concatenate them
     return pd.concat(
         [
-            pd.read_csv(convert_gs_to_gcs(blob.name))
+            pd.read_csv(convert_gs_to_gcs(f"gs://{bucket.name}/{blob.name}"))
             for blob in blobs
-            if fnmatch(blob.name, uri)
+            if fnmatch(blob.name, prefix)
         ],
         ignore_index=True,
     )
@@ -148,7 +149,11 @@ def write_df(
         filenname (str): The filename to write to.
     """
     # Convert the GCS URI to a GCS FUSE path
-    uri = convert_gs_to_gcs(config.model_export_uri)
+    uri = convert_gs_to_gcs(config.tensorboard_log_uri)
+
+    # Create the directory if it doesn't exist
+    os.makedirs(uri, exist_ok=True)
+
     uri = uri + "/" + filenname
 
     # Write the DataFrame to a CSV file in GCS
@@ -167,7 +172,11 @@ def write_json(
         filenname (str): The filename to write to.
     """
     # Convert the GCS URI to a GCS FUSE path
-    uri = convert_gs_to_gcs(config.model_export_uri)
+    uri = convert_gs_to_gcs(config.tensorboard_log_uri)
+
+    # Create the directory if it doesn't exist
+    os.makedirs(uri, exist_ok=True)
+
     uri = uri + "/" + filenname
 
     # Write the dict to a JSON file in GCS

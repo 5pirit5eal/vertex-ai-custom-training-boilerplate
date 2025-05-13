@@ -58,6 +58,18 @@ class Config(msgspec.Struct):
                     raise ValueError(
                         f"Invalid data URI for {self.data_format}: {uri}"
                     )
+        # Create the necessary folders
+        for uri in [
+            self.model_export_uri,
+            self.checkpoint_uri,
+            self.tensorboard_log_uri,
+        ]:
+            if uri is not None:
+                uri = uri.strip()
+                if uri.startswith("gs://"):
+                    os.makedirs("/gcs/" + uri[5:], exist_ok=True)
+                else:
+                    raise ValueError(f"Invalid GCS URI: {uri}")
 
 
 @click.command(name="train")
@@ -101,7 +113,7 @@ class Config(msgspec.Struct):
 @click.option(
     "--model-import-uri",
     help="Model import URI",
-    default=os.getenv("AIP_MODEL_DIR"),
+    default=None,
 )
 @click.option(
     "--model-export-uri",
@@ -129,7 +141,7 @@ class Config(msgspec.Struct):
     type=click.Choice(["binary", "multiclass", "regression", "quantile"]),
     default=None,
 )
-@click.option("--eval-metric", help="Evaluation metric", default="logloss")
+@click.option("--eval-metric", help="Evaluation metric", default=None)
 @click.option(
     "--presets",
     help="Preset for the training job",

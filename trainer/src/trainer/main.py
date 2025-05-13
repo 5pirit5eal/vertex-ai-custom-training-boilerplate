@@ -1,6 +1,8 @@
-import sys
-import os
 import logging
+import os
+import sys
+from datetime import datetime
+
 from autogluon.tabular import TabularPredictor
 
 from trainer.config import Config, load_config
@@ -13,6 +15,10 @@ def main():
         handlers=[logging.StreamHandler(sys.stdout)],
         format="%(message)s",
     )
+    logging.getLogger("autogluon").removeHandler(
+        logging.getLogger("autogluon").handlers[0]
+    )
+    logging.getLogger("autogluon").addHandler(logging.StreamHandler(sys.stdout))
     # Load the training data.
     logging.info("Loading config...")
     config: Config = load_config.main(standalone_mode=False)
@@ -27,14 +33,20 @@ def main():
     train_df, val_df, test_df = load_data(config)
 
     # Create a TabularPredictor.
-    predictor = TabularPredictor(
-        label=config.label,
-        eval_metric=config.eval_metric,
-        path=os.path.join(
-            convert_gs_to_gcs(config.model_export_uri), "autogluon"
-        ),
-        sample_weight="Weight" if "Weight" in train_df.columns else None,
-    )
+    if config.model_import_uri is not None:
+        logging.info("Importing model...")
+        predictor = TabularPredictor.load(config.model_import_uri)
+    else:
+        predictor = TabularPredictor(
+            label=config.label,
+            eval_metric=config.eval_metric,
+            sample_weight="Weight" if "Weight" in train_df.columns else None,
+            path=convert_gs_to_gcs(config.model_export_uri),
+            log_to_file=True,
+            log_file_path=os.path.join(
+                convert_gs_to_gcs(config.tensorboard_log_uri), "training.log"
+            ),
+        )
 
     # Fit the model
     logging.info("Fitting model...")
@@ -55,7 +67,6 @@ def main():
             config=config,
             df=test_predictions,
             filenname="test_predictions.csv",
-            split="test",
         )
 
         # Evaulate the model
@@ -68,13 +79,15 @@ def main():
         # Write the evaluation to a CSV file in GCS
         write_json(
             config=config,
-            df=test_evaluation,
-            filenname="test_evaluation.csv",
+            data=test_evaluation,
+            filenname="test_evaluation.json",
         )
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
         write_df(
-            config, predictor.feature_importance(), "feature_importance.csv"
+            config,
+            predictor.feature_importance(test_df),
+            "feature_importance.csv",
         )
 
 
