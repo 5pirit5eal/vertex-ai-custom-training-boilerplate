@@ -126,6 +126,20 @@ def load_data(
         else None
     )
 
+    if any(
+        preset in config.presets
+        for preset in ["best_quality", "good_quality", "high_quality"]
+    ):
+        # Concatenate train and val data for training
+        train_df = (
+            pd.concat([train_df, val_df], ignore_index=True).reset_index(
+                drop=True
+            )
+            if val_df is not None
+            else train_df
+        )
+        val_df = None
+
     test_df = (
         load_split_df(config, "test")
         if config.test_data_uri is not None
@@ -157,7 +171,7 @@ def write_df(
     uri = uri + "/" + filenname
 
     # Write the DataFrame to a CSV file in GCS
-    df.to_csv(uri, index=False)
+    df.to_csv(uri)
 
 
 def write_json(

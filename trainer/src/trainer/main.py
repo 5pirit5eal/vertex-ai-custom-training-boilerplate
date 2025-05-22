@@ -1,8 +1,8 @@
 import logging
 import os
 import sys
-from datetime import datetime
 
+import torch
 from autogluon.tabular import TabularPredictor
 
 from trainer.config import Config, load_config
@@ -27,6 +27,9 @@ def main():
     logging.getLogger().setLevel(
         logging.getLevelNamesMapping().get(config.log_level, logging.DEBUG)
     )
+
+    if config.use_gpu:
+        logging.info("GPU availability: %s", str(torch.cuda.is_available()))
 
     # Load the data
     logging.info("Loading data...")
@@ -55,7 +58,9 @@ def main():
         tuning_data=val_df,
         presets=config.presets,
         time_limit=config.time_limit,
+        num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
         # hyperparameters=training_config.hyperparameters,
+        ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
     )
 
     # Predict on the test data

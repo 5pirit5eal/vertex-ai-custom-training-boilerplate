@@ -34,7 +34,7 @@ class Config(msgspec.Struct):
     task_type: Literal["binary", "multiclass", "regression", "quantile"] | None
     eval_metric: str | None
     presets: str | list[str]
-    # hyperparameters: dict
+    use_gpu: bool = False
 
     def __post_init__(self) -> None:
         """Validates the metadata for correctness."""
@@ -70,6 +70,21 @@ class Config(msgspec.Struct):
                     os.makedirs("/gcs/" + uri[5:], exist_ok=True)
                 else:
                     raise ValueError(f"Invalid GCS URI: {uri}")
+
+        # Check that only one quality preset is used
+        if (
+            len(
+                [
+                    preset
+                    for preset in self.presets
+                    if "quality" in preset.lower()
+                ]
+            )
+            > 1
+        ):
+            raise ValueError(
+                f"Only one quality preset can be used. Found: {self.presets}"
+            )
 
 
 @click.command(name="train")
@@ -148,11 +163,14 @@ class Config(msgspec.Struct):
     default="best_quality",
     type=click.Choice(
         [
-            "medium_quality",
-            "good_quality",
-            "high_quality",
             "best_quality",
+            "high_quality",
+            "good_quality",
+            "medium_quality",
+            "experimental_quality",
             "optimize_for_deployment",
+            "interpretable",
+            "ignore_text",
         ]
     ),
 )
@@ -161,6 +179,12 @@ class Config(msgspec.Struct):
     help="Time limit for the training job in seconds",
     type=int,
     default=None,
+)
+@click.option(
+    "--use-gpu",
+    help="Use GPU for training",
+    is_flag=True,
+    default=False,
 )
 def load_config(**kwargs) -> Config:
     """Loads the metadata from environment variables including preconfigured vertex ai custom training variables."""
