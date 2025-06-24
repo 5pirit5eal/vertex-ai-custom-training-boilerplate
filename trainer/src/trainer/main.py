@@ -5,6 +5,8 @@ import sys
 import torch
 from autogluon.tabular import TabularPredictor
 
+from google.cloud import aiplatform
+
 from trainer.config import Config, load_config
 from trainer.data import convert_gs_to_gcs, load_data, write_df, write_json
 
@@ -28,8 +30,22 @@ def main():
         logging.getLevelNamesMapping().get(config.log_level, logging.DEBUG)
     )
 
+    print(os.environ)
+
     if config.use_gpu:
         logging.info("GPU availability: %s", str(torch.cuda.is_available()))
+
+    # Initialize the Vertex AI SDK
+    logging.info("Initializing Vertex AI SDK...")
+    aiplatform.init(
+        project=config.project_id,
+        location=config.region,
+        experiment=config.experiment_name,
+        experiment_run=config.experiment_run_name,
+        staging_bucket=convert_gs_to_gcs(config.model_export_uri),
+    )
+    aiplatform.autolog(config.experiment_name)
+    aiplatform.start_run(config.experiment_run_name)
 
     # Load the data
     logging.info("Loading data...")
@@ -92,9 +108,12 @@ def main():
         if config.calc_importance:
             write_df(
                 config,
-                predictor.feature_importance(test_df),
+                predictor.feature_importance(
+                    test_df, time_limit=0.2 * config.time_limit
+                ),
                 "feature_importance.csv",
             )
+    aiplatform.end_run()
 
 
 if __name__ == "__main__":

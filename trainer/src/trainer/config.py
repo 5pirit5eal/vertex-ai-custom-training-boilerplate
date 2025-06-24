@@ -37,6 +37,10 @@ class Config(msgspec.Struct):
     use_gpu: bool = False
     calc_importance: bool = False
 
+    # Vertex AI experiment variables
+    experiment_name: str | None = None
+    experiment_run_name: str | None = None
+
     def __post_init__(self) -> None:
         """Validates the metadata for correctness."""
         if self.data_format == "bigquery":
@@ -192,6 +196,14 @@ class Config(msgspec.Struct):
     help="Calculate feature importance",
     is_flag=True,
     default=False,
+)
+@click.option(
+    "--experiment-name",
+    help="Experiment name for Vertex AI",
+)
+@click.option(
+    "--experiment-run-name",
+    help="Experiment run name for Vertex AI",
 )
 def load_config(**kwargs) -> Config:
     """Loads the metadata from environment variables including preconfigured vertex ai custom training variables."""
