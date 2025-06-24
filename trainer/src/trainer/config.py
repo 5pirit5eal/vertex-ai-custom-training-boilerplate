@@ -35,6 +35,7 @@ class Config(msgspec.Struct):
     eval_metric: str | None
     presets: str | list[str]
     use_gpu: bool = False
+    calc_importance: bool = False
 
     def __post_init__(self) -> None:
         """Validates the metadata for correctness."""
@@ -183,6 +184,12 @@ class Config(msgspec.Struct):
 @click.option(
     "--use-gpu",
     help="Use GPU for training",
+    is_flag=True,
+    default=False,
+)
+@click.option(
+    "--calculate-importance",
+    help="Calculate feature importance",
     is_flag=True,
     default=False,
 )

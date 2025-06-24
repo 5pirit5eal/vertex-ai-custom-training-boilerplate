@@ -89,11 +89,12 @@ def main():
         )
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
-        write_df(
-            config,
-            predictor.feature_importance(test_df),
-            "feature_importance.csv",
-        )
+        if config.calc_importance:
+            write_df(
+                config,
+                predictor.feature_importance(test_df),
+                "feature_importance.csv",
+            )
 
 
 if __name__ == "__main__":
