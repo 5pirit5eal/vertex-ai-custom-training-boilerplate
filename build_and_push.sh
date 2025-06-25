@@ -34,7 +34,7 @@ REPO_URI="$IMAGE_URI:$DATETIME"
 DOCKERFILE_PATH="$COMPONENT/Dockerfile"
 
 # Build the Docker image
-DOCKER_BUILDKIT=1 docker build --platform linux/amd64 -f "$DOCKERFILE_PATH" "$COMPONENT/." -t "$REPO_URI"
+docker build --platform linux/amd64 -f "$DOCKERFILE_PATH" "$COMPONENT/." -t "$REPO_URI"
 
 # Push the image to Artifact Registry
 docker push "$REPO_URI"

@@ -1,14 +1,20 @@
 import logging
 import os
+import random
+import string
 import sys
 
 import torch
 from autogluon.tabular import TabularPredictor
-
 from google.cloud import aiplatform
 
 from trainer.config import Config, load_config
 from trainer.data import convert_gs_to_gcs, load_data, write_df, write_json
+
+
+# Generate a uuid of length 8
+def generate_uuid():
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
 
 
 def main():
@@ -36,16 +42,23 @@ def main():
         logging.info("GPU availability: %s", str(torch.cuda.is_available()))
 
     # Initialize the Vertex AI SDK
-    logging.info("Initializing Vertex AI SDK...")
-    aiplatform.init(
-        project=config.project_id,
-        location=config.region,
-        experiment=config.experiment_name,
-        experiment_run=config.experiment_run_name,
-        staging_bucket=convert_gs_to_gcs(config.model_export_uri),
-    )
-    aiplatform.autolog(config.experiment_name)
-    aiplatform.start_run(config.experiment_run_name)
+    if config.experiment_name:
+        logging.info("Initializing Vertex AI SDK...")
+        aiplatform.init(
+            project=config.project_id,
+            location=config.region,
+            experiment=config.experiment_name,
+            staging_bucket=convert_gs_to_gcs(config.model_export_uri),
+        )
+        aiplatform.autolog(
+            disable=True
+        )  # Disable autologging to avoid conflicts with autogluon
+        if config.experiment_run_name:
+            aiplatform.start_run(config.experiment_run_name)
+        else:
+            UUID = generate_uuid()
+            aiplatform.start_run(f"autogluon-{config.label}-{UUID}")
+        aiplatform.log_params(config.to_dict())
 
     # Load the data
     logging.info("Loading data...")
@@ -75,7 +88,7 @@ def main():
         presets=config.presets,
         time_limit=config.time_limit,
         num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
-        # hyperparameters=training_config.hyperparameters,
+        hyperparameters=config.hyperparameters,
         ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
     )
 
@@ -103,6 +116,8 @@ def main():
             data=test_evaluation,
             filenname="test_evaluation.json",
         )
+        if config.experiment_name:
+            aiplatform.log_metrics(test_evaluation)
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
         if config.calc_importance:
@@ -113,7 +128,14 @@ def main():
                 ),
                 "feature_importance.csv",
             )
-    aiplatform.end_run()
+        write_json(
+            config,
+            predictor.fit_summary(show_plot=True),
+            "fit_summary.json",
+        )
+    if config.experiment_name:
+        logging.info("Logging metrics to Vertex AI...")
+        aiplatform.end_run()
 
 
 if __name__ == "__main__":

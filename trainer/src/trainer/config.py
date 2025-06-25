@@ -1,15 +1,13 @@
 import os
-from typing import Literal
+from typing import Literal, Any
 
 import click
 import msgspec
 
 
-class Hyperparameters(msgspec.Struct):
-    """Configuration of hyperparameters for the training job."""
-
-    # TODO: Hyperparameters for the training job
-    tbd: str | None = None
+from autogluon.tabular.configs.hyperparameter_configs import (
+    get_hyperparameter_config,
+)
 
 
 class Config(msgspec.Struct):
@@ -36,6 +34,8 @@ class Config(msgspec.Struct):
     presets: str | list[str]
     use_gpu: bool = False
     calc_importance: bool = False
+    hyperparameters: dict[str, Any] | None = None
+    multimodal: bool = False
 
     # Vertex AI experiment variables
     experiment_name: str | None = None
@@ -90,6 +90,20 @@ class Config(msgspec.Struct):
             raise ValueError(
                 f"Only one quality preset can be used. Found: {self.presets}"
             )
+
+        # Set the hyperparameters if multimodal is True
+        if self.multimodal:
+            if self.hyperparameters is None:
+                self.hyperparameters = {}
+            self.hyperparameters.update(get_hyperparameter_config("multimodal"))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Converts the Config object to a dictionary."""
+        return {
+            key: value
+            for key, value in msgspec.to_builtins(self).items()
+            if isinstance(value, (str, int, bool, float))
+        }
 
 
 @click.command(name="train")
@@ -188,6 +202,12 @@ class Config(msgspec.Struct):
 @click.option(
     "--use-gpu",
     help="Use GPU for training",
+    is_flag=True,
+    default=False,
+)
+@click.option(
+    "--multimodal",
+    help="Use multimodal training",
     is_flag=True,
     default=False,
 )

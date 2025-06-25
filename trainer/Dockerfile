@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip uninstall ray
 
 # Use the final image without uv
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-base-ubuntu22.04
 
 # Copy the application from the builder
 COPY --from=builder --chown=python:python /python /python
