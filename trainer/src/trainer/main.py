@@ -4,12 +4,21 @@ import random
 import string
 import sys
 
+import pandas as pd
 import torch
 from autogluon.tabular import TabularPredictor
 from google.cloud import aiplatform
+from sklearn.metrics import roc_curve
 
 from trainer.config import Config, load_config
-from trainer.data import convert_gs_to_gcs, load_data, write_df, write_json
+from trainer.data import (
+    convert_gs_to_gcs,
+    load_data,
+    write_df,
+    write_json,
+    log_nested_metrics,
+    log_learning_curves,
+)
 
 
 # Generate a uuid of length 8
@@ -27,6 +36,7 @@ def main():
         logging.getLogger("autogluon").handlers[0]
     )
     logging.getLogger("autogluon").addHandler(logging.StreamHandler(sys.stdout))
+
     # Load the training data.
     logging.info("Loading config...")
     config: Config = load_config.main(standalone_mode=False)
@@ -36,7 +46,14 @@ def main():
         logging.getLevelNamesMapping().get(config.log_level, logging.DEBUG)
     )
 
-    print(os.environ)
+    # Add file handler to write logs to a file in the logging directory
+    log_path = os.path.join(
+        convert_gs_to_gcs(config.tensorboard_log_uri), "training.log"
+    )
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger().addHandler(file_handler)
+    logging.getLogger("autogluon").addHandler(file_handler)
 
     if config.use_gpu:
         logging.info("GPU availability: %s", str(torch.cuda.is_available()))
@@ -50,14 +67,12 @@ def main():
             experiment=config.experiment_name,
             staging_bucket=convert_gs_to_gcs(config.model_export_uri),
         )
-        aiplatform.autolog(
-            disable=True
-        )  # Disable autologging to avoid conflicts with autogluon
         if config.experiment_run_name:
             aiplatform.start_run(config.experiment_run_name)
         else:
             UUID = generate_uuid()
             aiplatform.start_run(f"autogluon-{config.label}-{UUID}")
+
         aiplatform.log_params(config.to_dict())
 
     # Load the data
@@ -66,18 +81,17 @@ def main():
 
     # Create a TabularPredictor.
     if config.model_import_uri is not None:
-        logging.info("Importing model...")
-        predictor = TabularPredictor.load(config.model_import_uri)
+        logging.info("Importing model from checkpoint...")
+        predictor: TabularPredictor = TabularPredictor.load(
+            config.model_import_uri
+        )
     else:
         predictor = TabularPredictor(
             label=config.label,
             eval_metric=config.eval_metric,
             sample_weight="Weight" if "Weight" in train_df.columns else None,
             path=convert_gs_to_gcs(config.model_export_uri),
-            log_to_file=True,
-            log_file_path=os.path.join(
-                convert_gs_to_gcs(config.tensorboard_log_uri), "training.log"
-            ),
+            log_to_file=False,
         )
 
     # Fit the model
@@ -90,6 +104,7 @@ def main():
         num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
         hyperparameters=config.hyperparameters,
         ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
+        learning_curves=True,
     )
 
     # Predict on the test data
@@ -100,24 +115,34 @@ def main():
         write_df(
             config=config,
             df=test_predictions,
-            filenname="test_predictions.csv",
+            filename="test_predictions.csv",
         )
 
         # Evaulate the model
         test_evaluation = predictor.evaluate_predictions(
             y_true=test_df[config.label],
             y_pred=test_predictions,
+            display=True,
             auxiliary_metrics=True,
+            detailed_report=True,
+        )
+
+        confusion_matrix: pd.DataFrame = test_evaluation.pop(
+            "confusion_matrix", None
         )
 
         # Write the evaluation to a CSV file in GCS
         write_json(
             config=config,
             data=test_evaluation,
-            filenname="test_evaluation.json",
+            filename="test_evaluation.json",
         )
         if config.experiment_name:
-            aiplatform.log_metrics(test_evaluation)
+            logging.info("Logging evaluation metrics to Vertex AI...")
+            classification_report: dict = test_evaluation.pop(
+                "classification_report", {}
+            )
+            log_nested_metrics(classification_report)
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
         if config.calc_importance:
@@ -128,13 +153,44 @@ def main():
                 ),
                 "feature_importance.csv",
             )
-        write_json(
-            config,
-            predictor.fit_summary(show_plot=True),
-            "fit_summary.json",
-        )
+
+        summary = predictor.fit_summary(show_plot=False)
+        del summary["leaderboard"]
+        write_json(config, summary, "fit_summary.json")
+
+        metadata, model_data = predictor.learning_curves()
+        write_json(config, data=metadata, filename="metadata.json")
+
     if config.experiment_name:
         logging.info("Logging metrics to Vertex AI...")
+
+        log_learning_curves(model_data)
+        if predictor.problem_type == "binary":
+            logging.info("Logging ROC curve...")
+            positive_class = predictor.class_labels[-1]
+            y_true_numerical = test_df[config.label].apply(
+                lambda x: 1 if x == positive_class else 0
+            )
+            fpr, tpr, threshold = roc_curve(
+                y_true_numerical, test_predictions[positive_class]
+            )
+            logging.info(
+                f"ROC Curve - {positive_class}:\n"
+                f"FPR: {fpr.tolist()}\n"
+                f"TPR: {tpr.tolist()}\n"
+                f"Thresholds: {threshold.tolist()}"
+            )
+            aiplatform.log_classification_metrics(
+                fpr=fpr.tolist(),
+                tpr=tpr.tolist(),
+                threshold=threshold.tolist(),
+                display_name=f"ROC Curve - {positive_class}",
+            )
+        aiplatform.log_classification_metrics(
+            labels=predictor.class_labels,
+            matrix=confusion_matrix.to_numpy().tolist(),
+        )
+
         aiplatform.end_run()
 
 

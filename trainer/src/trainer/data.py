@@ -2,10 +2,10 @@ import json
 import logging
 import os
 from fnmatch import fnmatch
-from typing import Literal
+from typing import Literal, Any
 
 import pandas as pd
-from google.cloud import bigquery, storage
+from google.cloud import bigquery, storage, aiplatform
 
 from trainer.config import Config
 
@@ -153,14 +153,14 @@ def load_data(
 def write_df(
     config: Config,
     df: pd.DataFrame,
-    filenname: str,
+    filename: str,
 ) -> None:
     """Writes a DataFrame to a GCS URI.
 
     Args:
         config (Config): The configuration object containing the data URI.
         df (pd.DataFrame): The DataFrame to write.
-        filenname (str): The filename to write to.
+        filename (str): The filename to write to.
     """
     # Convert the GCS URI to a GCS FUSE path
     uri = convert_gs_to_gcs(config.tensorboard_log_uri)
@@ -168,7 +168,7 @@ def write_df(
     # Create the directory if it doesn't exist
     os.makedirs(uri, exist_ok=True)
 
-    uri = uri + "/" + filenname
+    uri = uri + "/" + filename
 
     # Write the DataFrame to a CSV file in GCS
     df.to_csv(uri)
@@ -177,13 +177,13 @@ def write_df(
 def write_json(
     config: Config,
     data: dict,
-    filenname: str,
+    filename: str,
 ) -> None:
     """Writes a dict as JSON to a GCS URI.
     Args:
         config (Config): The configuration object containing the data URI.
         data (dict): The dict to write.
-        filenname (str): The filename to write to.
+        filename (str): The filename to write to.
     """
     # Convert the GCS URI to a GCS FUSE path
     uri = convert_gs_to_gcs(config.tensorboard_log_uri)
@@ -191,8 +191,42 @@ def write_json(
     # Create the directory if it doesn't exist
     os.makedirs(uri, exist_ok=True)
 
-    uri = uri + "/" + filenname
+    uri = uri + "/" + filename
 
     # Write the dict to a JSON file in GCS
     with open(uri, "w") as f:
-        json.dump(data, f)
+        json.dump(data, f, skipkeys=True)
+
+
+def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:
+    """Recursively logs metrics to an aiplatform experiment."""
+    for key, value in metrics.items():
+        if isinstance(value, dict):
+            if prefix:
+                log_nested_metrics(value, prefix=f"{prefix} {key}")
+            else:
+                log_nested_metrics(value, prefix=key)
+        else:
+            if prefix:
+                key = f"{prefix} {key}"
+            aiplatform.log_metrics({key: value})
+
+
+def log_learning_curves(model_data: dict[str, list]) -> None:
+    """Logs learning curves returned by the predictor to an aiplatform experiment.
+
+    Args:
+        model_data (dict[str, list]): The model data containing the learning curves per model.
+    """
+    for model_name, data in model_data.items():
+        learning_curves = data[2]
+        splits = data[0]
+        metrics = data[1]
+
+        # learning curves are per metric, per split
+        for n, metric in enumerate(metrics):
+            for split, curve in zip(splits, learning_curves[n]):
+                for i, elem in enumerate(curve, start=1):
+                    aiplatform.log_time_series_metrics(
+                        {f"{model_name} {metric} {split}": elem}, step=i
+                    )
