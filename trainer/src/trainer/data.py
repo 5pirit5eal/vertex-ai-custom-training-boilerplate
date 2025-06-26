@@ -1,11 +1,12 @@
 import json
 import logging
 import os
+import time
 from fnmatch import fnmatch
-from typing import Literal, Any
+from typing import Any, Literal
 
 import pandas as pd
-from google.cloud import bigquery, storage, aiplatform
+from google.cloud import aiplatform, bigquery, storage
 
 from trainer.config import Config
 
@@ -230,3 +231,4 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
                     aiplatform.log_time_series_metrics(
                         {f"{model_name} {metric} {split}": elem}, step=i
                     )
+                    time.sleep(0.1)  # Sleep to avoid rate limiting
