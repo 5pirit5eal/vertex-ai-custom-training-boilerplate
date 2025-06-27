@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 import pandas as pd
 from google.cloud import aiplatform, bigquery, storage
+from numpy import inf
+from sklearn.metrics import roc_curve
 
 from trainer.config import Config
 
@@ -67,7 +69,7 @@ def load_split_df(
             uri = convert_gs_to_gcs(data_uri)
 
             df = pd.read_csv(uri)
-        except Exception as e:
+        except Exception:
             df = load_wildcard_csv(config, data_uri)
     else:
         logging.info(f"Loading {split} jsonl data from GCS")
@@ -219,6 +221,11 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
     Args:
         model_data (dict[str, list]): The model data containing the learning curves per model.
     """
+    # Create a flattened dictionary of results
+    # The keys will be in the format "model_name metric split"
+    # The values will be the learning curves for that metric and split
+    # e.g. "model_name accuracy train" -> [0.1, 0.2, 0.3, ...]
+    results: dict[str, list] = {}
     for model_name, data in model_data.items():
         learning_curves = data[2]
         splits = data[0]
@@ -227,8 +234,46 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
         # learning curves are per metric, per split
         for n, metric in enumerate(metrics):
             for split, curve in zip(splits, learning_curves[n]):
-                for i, elem in enumerate(curve, start=1):
-                    aiplatform.log_time_series_metrics(
-                        {f"{model_name} {metric} {split}": elem}, step=i
-                    )
-                    time.sleep(0.1)  # Sleep to avoid rate limiting
+                results[f"{model_name} {metric} {split}"] = curve
+
+    # Get the maximum length of the curves
+    max_length = max(len(curve) for curve in results.values())
+
+    for n in range(max_length):
+        aiplatform.log_time_series_metrics(
+            {key: curve[n] for key, curve in results.items() if len(curve) > n},
+            step=n,
+        )
+        time.sleep(0.1)  # Sleep to avoid rate limiting
+
+
+def log_roc_curve(
+    label_column: str,
+    positive_class: str,
+    test_df: pd.DataFrame,
+    test_predictions: pd.DataFrame,
+) -> None:
+    """Logs the ROC curve for a binary classification problem to an aiplatform experiment.
+
+    Args:
+        label_column (str): The name of the column containing the true labels.
+        positive_class (str): The class label for the positive class.
+        test_df (pd.DataFrame): The DataFrame containing the test data.
+        test_predictions (pd.DataFrame): The DataFrame containing the test predictions.
+    """
+    y_true_numerical = test_df[label_column].apply(
+        lambda x: 1 if x == positive_class else 0
+    )
+    fpr, tpr, threshold = roc_curve(
+        y_true_numerical, test_predictions[positive_class]
+    )
+    fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
+    tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
+    threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
+
+    aiplatform.log_classification_metrics(
+        fpr=fpr.tolist(),
+        tpr=tpr.tolist(),
+        threshold=threshold.tolist(),
+        display_name=f"ROC Curve - {positive_class}",
+    )

@@ -8,16 +8,16 @@ import pandas as pd
 import torch
 from autogluon.tabular import TabularPredictor
 from google.cloud import aiplatform
-from sklearn.metrics import roc_curve
 
 from trainer.config import Config, load_config
 from trainer.data import (
     convert_gs_to_gcs,
     load_data,
+    log_learning_curves,
+    log_nested_metrics,
+    log_roc_curve,
     write_df,
     write_json,
-    log_nested_metrics,
-    log_learning_curves,
 )
 
 
@@ -167,28 +167,23 @@ def main():
         log_learning_curves(model_data)
         if predictor.problem_type == "binary":
             logging.info("Logging ROC curve...")
-            positive_class = predictor.class_labels[-1]
-            y_true_numerical = test_df[config.label].apply(
-                lambda x: 1 if x == positive_class else 0
+            positive_class = predictor.positive_class
+            log_roc_curve(
+                label_column=config.label,
+                positive_class=positive_class,
+                test_df=test_df,
+                test_predictions=test_predictions,
             )
-            fpr, tpr, threshold = roc_curve(
-                y_true_numerical, test_predictions[positive_class]
-            )
+        elif predictor.problem_type == "multiclass":
+            # TODO: Implement multiclass ROC curve logging
             logging.info(
-                f"ROC Curve - {positive_class}:\n"
-                f"FPR: {fpr.tolist()}\n"
-                f"TPR: {tpr.tolist()}\n"
-                f"Thresholds: {threshold.tolist()}"
+                "Multiclass ROC curve logging is not implemented yet. Skipping..."
             )
-            aiplatform.log_classification_metrics(
-                fpr=fpr.tolist(),
-                tpr=tpr.tolist(),
-                threshold=threshold.tolist(),
-                display_name=f"ROC Curve - {positive_class}",
-            )
+
         aiplatform.log_classification_metrics(
             labels=predictor.class_labels,
             matrix=confusion_matrix.to_numpy().tolist(),
+            display_name="Confusion Matrix - " + config.label,
         )
 
         aiplatform.end_run()

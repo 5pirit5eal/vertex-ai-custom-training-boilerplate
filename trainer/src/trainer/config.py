@@ -1,10 +1,8 @@
 import os
-from typing import Literal, Any
+from typing import Any, Literal
 
 import click
 import msgspec
-
-
 from autogluon.tabular.configs.hyperparameter_configs import (
     get_hyperparameter_config,
 )
