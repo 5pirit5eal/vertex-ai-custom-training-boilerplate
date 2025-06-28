@@ -149,6 +149,8 @@ def main():
                 "classification_report", {}
             )
             log_nested_metrics(classification_report)
+            # Remove the confusion matrix from the evaluation metrics
+            test_evaluation.pop("confusion_matrix", None)
             aiplatform.log_metrics(test_evaluation)
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
