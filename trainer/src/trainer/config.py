@@ -31,7 +31,7 @@ class Config(msgspec.Struct):
     eval_metric: str | None
     presets: str | list[str]
     use_gpu: bool = False
-    calc_importance: bool = False
+    calculate_importance: bool = False
     hyperparameters: dict[str, Any] | None = None
     multimodal: bool = False
 

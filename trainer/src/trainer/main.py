@@ -131,6 +131,12 @@ def main():
             "confusion_matrix", None
         )
 
+        test_evaluation["confusion_matrix"] = (
+            confusion_matrix.to_dict(orient="list")
+            if confusion_matrix is not None
+            else None
+        )
+
         # Write the evaluation to a CSV file in GCS
         write_json(
             config=config,
@@ -143,9 +149,10 @@ def main():
                 "classification_report", {}
             )
             log_nested_metrics(classification_report)
+            aiplatform.log_metrics(test_evaluation)
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
-        if config.calc_importance:
+        if config.calculate_importance:
             write_df(
                 config,
                 predictor.feature_importance(
@@ -160,6 +167,7 @@ def main():
 
         metadata, model_data = predictor.learning_curves()
         write_json(config, data=metadata, filename="metadata.json")
+        write_json(config, data=model_data, filename="model_data.json")
 
     if config.experiment_name:
         logging.info("Logging metrics to Vertex AI...")

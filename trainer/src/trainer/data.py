@@ -197,8 +197,12 @@ def write_json(
     uri = uri + "/" + filename
 
     # Write the dict to a JSON file in GCS
-    with open(uri, "w") as f:
-        json.dump(data, f, skipkeys=True)
+    try:
+        with open(uri, "w") as f:
+            json.dump(data, f, skipkeys=True)
+    except Exception as e:
+        logging.error(f"Error writing JSON to {uri}: {e}")
+        return
 
 
 def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:
@@ -226,25 +230,33 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
     # The values will be the learning curves for that metric and split
     # e.g. "model_name accuracy train" -> [0.1, 0.2, 0.3, ...]
     results: dict[str, list] = {}
-    for model_name, data in model_data.items():
-        learning_curves = data[2]
-        splits = data[0]
-        metrics = data[1]
+    try:
+        for model_name, data in model_data.items():
+            learning_curves = data[2]
+            splits = data[0]
+            metrics = data[1]
 
-        # learning curves are per metric, per split
-        for n, metric in enumerate(metrics):
-            for split, curve in zip(splits, learning_curves[n]):
-                results[f"{model_name} {metric} {split}"] = curve
+            # learning curves are per metric, per split
+            for n, metric in enumerate(metrics):
+                for split, curve in zip(splits, learning_curves[n]):
+                    results[f"{model_name} {metric} {split}"] = curve
 
-    # Get the maximum length of the curves
-    max_length = max(len(curve) for curve in results.values())
+        # Get the maximum length of the curves
+        max_length = max((len(curve) for curve in results.values()), default=0)
 
-    for n in range(max_length):
-        aiplatform.log_time_series_metrics(
-            {key: curve[n] for key, curve in results.items() if len(curve) > n},
-            step=n,
-        )
-        time.sleep(0.1)  # Sleep to avoid rate limiting
+        for n in range(max_length):
+            aiplatform.log_time_series_metrics(
+                {
+                    key: curve[n]
+                    for key, curve in results.items()
+                    if len(curve) > n
+                },
+                step=n,
+            )
+            time.sleep(0.1)  # Sleep to avoid rate limiting
+    except Exception as e:
+        logging.error(f"Error logging learning curves: {e}")
+        return
 
 
 def log_roc_curve(
@@ -261,19 +273,23 @@ def log_roc_curve(
         test_df (pd.DataFrame): The DataFrame containing the test data.
         test_predictions (pd.DataFrame): The DataFrame containing the test predictions.
     """
-    y_true_numerical = test_df[label_column].apply(
-        lambda x: 1 if x == positive_class else 0
-    )
-    fpr, tpr, threshold = roc_curve(
-        y_true_numerical, test_predictions[positive_class]
-    )
-    fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-    tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-    threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
+    try:
+        y_true_numerical = test_df[label_column].apply(
+            lambda x: 1 if x == positive_class else 0
+        )
+        fpr, tpr, threshold = roc_curve(
+            y_true_numerical, test_predictions[positive_class]
+        )
+        fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
+        tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
+        threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
 
-    aiplatform.log_classification_metrics(
-        fpr=fpr.tolist(),
-        tpr=tpr.tolist(),
-        threshold=threshold.tolist(),
-        display_name=f"ROC Curve - {positive_class}",
-    )
+        aiplatform.log_classification_metrics(
+            fpr=fpr.tolist(),
+            tpr=tpr.tolist(),
+            threshold=threshold.tolist(),
+            display_name=f"ROC Curve - {positive_class}",
+        )
+    except Exception as e:
+        logging.error(f"Error logging ROC curve: {e}")
+        return
