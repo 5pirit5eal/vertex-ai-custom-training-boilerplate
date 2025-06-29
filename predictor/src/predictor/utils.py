@@ -9,21 +9,6 @@ BUCKET_URI = os.getenv(
 )
 
 
-def gcs_fuse_path(path: str) -> str:
-    """Try to convert path to gcsfuse path if it starts with gs:// else do not modify it.
-
-    Args:
-      path: A string of path.
-
-    Returns:
-      A gcsfuse path.
-    """
-    path = path.strip()
-    if path.startswith("gs://"):
-        return "/gcs/" + path[5:]
-    return path
-
-
 def download_gcs_dir_to_local(
     gcs_dir: str,
     local_dir: str,

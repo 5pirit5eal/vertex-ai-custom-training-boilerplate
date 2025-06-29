@@ -9,6 +9,8 @@ dependencies = [
     "google-cloud-storage>=3.1.0",
     "litestar>=2.16.0",
     "pandas>=2.2.3",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
     "uvicorn>=0.34.3",
 ]
 
@@ -24,6 +26,27 @@ disable_error_code = ["import-untyped", "attr-defined"]
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux/amd64'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux/amd64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
 
 [build-system]
 requires = ["hatchling"]

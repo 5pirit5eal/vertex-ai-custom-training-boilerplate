@@ -23,6 +23,7 @@ import pandas as pd
 from autogluon.tabular import TabularPredictor
 from litestar import Litestar, Request, Response, get, post
 from litestar.status_codes import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
+from torch.cuda import is_available
 
 from predictor.utils import download_gcs_dir_to_local
 
@@ -38,10 +39,13 @@ logging.info(f"Model directory passed by the user is: {model_dir}")
 if model_dir.startswith(GCS_URI_PREFIX):
     gcs_path = model_dir[len(GCS_URI_PREFIX) :]
     local_model_dir = os.path.join(LOCAL_MODEL_DIR, gcs_path)
-    logging.info(f"Download {model_dir} to {local_model_dir}")
-    download_gcs_dir_to_local(model_dir, local_model_dir)
-    model_dir = local_model_dir
-    logging.info(f"Local model directory is: {model_dir}")
+    if not os.path.exists(local_model_dir):
+        logging.info(f"Downloading {model_dir} to {local_model_dir}")
+        download_gcs_dir_to_local(model_dir, local_model_dir)
+        model_dir = local_model_dir
+        logging.info(f"Finished downloading model to {model_dir}")
+
+logging.info(f"Cuda available: {is_available()}")
 
 predictor = TabularPredictor.load(model_dir)
 
@@ -57,7 +61,7 @@ async def predict(request: Request) -> Response:
         data = await request.json()
         instances = data.get("instances", [])
         df_to_predict = pd.DataFrame(instances)
-        predictions = predictor.predict(df_to_predict).tolist()
+        predictions = predictor.predict_proba(df_to_predict).tolist()  # type: ignore
         response = {"predictions": predictions}
         return Response(
             content=json.dumps(response),

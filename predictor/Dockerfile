@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -7,12 +7,10 @@ ENV UV_COMPILE_BYTECODE=1
 
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
+ENV UV_PYTHON_INSTALL_DIR=/python
+ENV UV_PYTHON_PREFERENCE=only-managed
 
-# Disable Python downloads, because we want to use the system interpreter
-# across both images. If using a managed Python version, it needs to be
-# copied from the build image into the final image; see `standalone.Dockerfile`
-# for an example.
-ENV UV_PYTHON_DOWNLOADS=0
+RUN uv python install 3.12
 
 # Install project dependencies and the project itself
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -25,12 +23,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
 # Use the final image without uv
-FROM python:3.12-slim-bookworm
+FROM nvidia/cuda:12.6.3-base-ubuntu22.04
 
 # Autogluon relies on libgomp1, which is not included in the slim image
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends libgomp1
 
 # Copy the application from the builder
+COPY --from=builder --chown=python:python /python /python
 COPY --from=builder --chown=app:app /app /app
 
 # Place executables in the environment at the front of the path
