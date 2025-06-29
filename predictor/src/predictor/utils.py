@@ -9,13 +9,7 @@ BUCKET_URI = os.getenv(
 )
 
 
-def download_gcs_dir_to_local(
-    gcs_dir: str,
-    local_dir: str,
-    skip_hf_model_bin: bool = False,
-    allow_patterns: list[str] | None = None,
-    log: bool = True,
-) -> None:
+def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
     """Downloads files in a GCS directory to a local directory.
 
     For example:
@@ -26,10 +20,6 @@ def download_gcs_dir_to_local(
     Args:
       gcs_dir: A string of directory path on GCS.
       local_dir: A string of local directory path.
-      skip_hf_model_bin: True to skip downloading HF model bin files.
-      allow_patterns: A list of allowed patterns. If provided, only files matching
-        one or more patterns are downloaded.
-      log: True to log each downloaded file.
     """
     if not gcs_dir.startswith("gs://"):
         raise ValueError(f"{gcs_dir} is not a GCS path starting with gs://.")
@@ -43,16 +33,5 @@ def download_gcs_dir_to_local(
         file_path = blob.name[len(prefix) :].strip("/")
         local_file_path = os.path.join(local_dir, file_path)
         os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-        if allow_patterns and all(
-            [not fnmatch.fnmatch(file_path, p) for p in allow_patterns]
-        ):
-            continue
-        if file_path.endswith(".bin") and skip_hf_model_bin:
-            if log:
-                print("Skip downloading model bin", file_path)
-            with open(local_file_path, "w") as f:
-                f.write(f"gs://{bucket_name}/{prefix}{file_path}")
-        else:
-            if log:
-                print("Downloading", file_path, "to", local_file_path)
-            blob.download_to_filename(local_file_path)
+        print("Downloading", file_path, "to", local_file_path)
+        blob.download_to_filename(local_file_path)

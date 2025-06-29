@@ -18,11 +18,17 @@ stored. If `model_path` is not provided, it defaults to '/autogluon/models'.
 import json
 import logging
 import os
+import threading
 
 import pandas as pd
 from autogluon.tabular import TabularPredictor
 from litestar import Litestar, Request, Response, get, post
-from litestar.status_codes import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
+from litestar.datastructures import State
+from litestar.status_codes import (
+    HTTP_200_OK,
+    HTTP_500_INTERNAL_SERVER_ERROR,
+    HTTP_503_SERVICE_UNAVAILABLE,
+)
 from torch.cuda import is_available
 
 from predictor.utils import download_gcs_dir_to_local
@@ -33,35 +39,48 @@ GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
 
 
-# Model loading
-model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
-logging.info(f"Model directory passed by the user is: {model_dir}")
-if model_dir.startswith(GCS_URI_PREFIX):
-    gcs_path = model_dir[len(GCS_URI_PREFIX) :]
-    local_model_dir = os.path.join(LOCAL_MODEL_DIR, gcs_path)
-    if not os.path.exists(local_model_dir):
-        logging.info(f"Downloading {model_dir} to {local_model_dir}")
-        download_gcs_dir_to_local(model_dir, local_model_dir)
-        model_dir = local_model_dir
-        logging.info(f"Finished downloading model to {model_dir}")
+def load_model(state: State) -> None:
+    """Loads the model in a background thread."""
+    model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
+    logging.info(f"Model directory passed by the user is: {model_dir}")
+    if model_dir.startswith(GCS_URI_PREFIX):
+        gcs_path = model_dir[len(GCS_URI_PREFIX) :]
+        local_model_dir = os.path.join(LOCAL_MODEL_DIR, gcs_path)
+        if not os.path.exists(local_model_dir):
+            logging.info(f"Downloading {model_dir} to {local_model_dir}")
+            download_gcs_dir_to_local(model_dir, local_model_dir)
+            model_dir = local_model_dir
+            logging.info(f"Finished downloading model to {model_dir}")
 
-logging.info(f"Cuda available: {is_available()}")
-
-predictor = TabularPredictor.load(model_dir)
+    logging.info(f"Cuda available: {is_available()}")
+    state.predictor = TabularPredictor.load(model_dir)
+    state.is_model_ready = True
+    logging.info("Model loaded and ready to serve predictions.")
 
 
 @get(os.getenv("AIP_HEALTH_ROUTE", "/ping"))
-async def ping() -> Response:
-    return Response(content="pong", status_code=HTTP_200_OK)
+async def ping(state: State) -> Response:
+    if not state.is_model_ready:
+        return Response(
+            content="Model not ready",
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return Response(content="Model is ready", status_code=HTTP_200_OK)
 
 
 @post(os.getenv("AIP_PREDICT_ROUTE", "/predict"))
-async def predict(request: Request) -> Response:
+async def predict(request: Request, state: State) -> Response:
+    if not state.is_model_ready:
+        return Response(
+            content=json.dumps({"error": "Model not ready"}),
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+            media_type="application/json",
+        )
     try:
         data = await request.json()
         instances = data.get("instances", [])
         df_to_predict = pd.DataFrame(instances)
-        predictions = predictor.predict_proba(df_to_predict).tolist()  # type: ignore
+        predictions = state.predictor.predict_proba(df_to_predict).tolist()
         response = {"predictions": predictions}
         return Response(
             content=json.dumps(response),
@@ -76,7 +95,19 @@ async def predict(request: Request) -> Response:
         )
 
 
-app = Litestar(route_handlers=[ping, predict])
+def startup(app: Litestar) -> None:
+    """Starts the model loading in a background thread."""
+    app.state.is_model_ready = False
+    app.state.predictor = None
+    logging.info("Starting model loading in a background thread.")
+    thread = threading.Thread(target=load_model, args=(app.state,))
+    thread.start()
+
+
+app = Litestar(
+    route_handlers=[ping, predict],
+    on_startup=[startup],
+)
 
 if __name__ == "__main__":
     import uvicorn
