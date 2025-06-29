@@ -61,6 +61,13 @@ class Config(msgspec.Struct):
                     raise ValueError(
                         f"Invalid data URI for {self.data_format}: {uri}"
                     )
+        if (
+            self.tensorboard_log_uri is None
+            and self.model_export_uri is not None
+        ):
+            # If no tensorboard log URI is provided, use the model export URI
+            self.tensorboard_log_uri = self.model_export_uri
+
         # Create the necessary folders
         for uri in [
             self.model_export_uri,
