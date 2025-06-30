@@ -80,8 +80,9 @@ async def predict(request: Request, state: State) -> Response:
         data = await request.json()
         instances = data.get("instances", [])
         df_to_predict = pd.DataFrame(instances)
-        predictions = state.predictor.predict_proba(df_to_predict).tolist()
-        response = {"predictions": predictions}
+        model: TabularPredictor = state.predictor
+        predictions: pd.DataFrame = model.predict_proba(df_to_predict)
+        response = {"predictions": predictions.to_dict(orient="records")}
         return Response(
             content=json.dumps(response),
             status_code=HTTP_200_OK,
