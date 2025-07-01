@@ -103,14 +103,14 @@ def main():
         time_limit=config.time_limit,
         num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
         hyperparameters=config.hyperparameters,
-        ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
+        # ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
         learning_curves=True,
     )
 
     # Predict on the test data
     logging.info("Predicting on test data and writing results...")
     if test_df is not None:
-        test_predictions = predictor.predict_proba(test_df)
+        test_predictions: pd.DataFrame = predictor.predict_proba(test_df)  # type: ignore
         # Write the predictions to a CSV file in GCS
         write_df(
             config=config,
@@ -158,7 +158,10 @@ def main():
             write_df(
                 config,
                 predictor.feature_importance(
-                    test_df, time_limit=0.2 * config.time_limit
+                    test_df,
+                    time_limit=0.2 * config.time_limit  # type: ignore
+                    if config.time_limit
+                    else None,
                 ),
                 "feature_importance.csv",
             )
@@ -185,10 +188,14 @@ def main():
                 test_predictions=test_predictions,
             )
         elif predictor.problem_type == "multiclass":
-            # TODO: Implement multiclass ROC curve logging
-            logging.info(
-                "Multiclass ROC curve logging is not implemented yet. Skipping..."
-            )
+            logging.info("Logging multiclass ROC curve...")
+            for class_label in predictor.class_labels:
+                log_roc_curve(
+                    label_column=config.label,
+                    positive_class=class_label,
+                    test_df=test_df,
+                    test_predictions=test_predictions,
+                )
 
         aiplatform.log_classification_metrics(
             labels=predictor.class_labels,

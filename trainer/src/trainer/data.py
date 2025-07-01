@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import pandas as pd
 from google.cloud import aiplatform, bigquery, storage
-from numpy import inf
+from numpy import inf, linspace
 from sklearn.metrics import roc_curve
 
 from trainer.config import Config
@@ -261,7 +261,7 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
 
 def log_roc_curve(
     label_column: str,
-    positive_class: str,
+    positive_class: str | int,
     test_df: pd.DataFrame,
     test_predictions: pd.DataFrame,
 ) -> None:
@@ -283,6 +283,13 @@ def log_roc_curve(
         fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
         tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
         threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
+
+        # Subsample the data to 1000 points for plotting
+        if len(fpr) > 1000:
+            indices = linspace(0, len(fpr) - 1, 1000, dtype=int)
+            fpr = fpr[indices]
+            tpr = tpr[indices]
+            threshold = threshold[indices]
 
         aiplatform.log_classification_metrics(
             fpr=fpr.tolist(),
