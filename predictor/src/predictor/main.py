@@ -53,7 +53,17 @@ def load_model(state: State) -> None:
             logging.info(f"Finished downloading model to {model_dir}")
 
     logging.info(f"Cuda available: {is_available()}")
-    state.predictor = TabularPredictor.load(model_dir)
+    model = TabularPredictor.load(model_dir)
+    state.predictor = model.clone_for_deployment(
+        path=model_dir + "/opt",
+        return_clone=True,
+    )
+    if isinstance(state.predictor, TabularPredictor):
+        state.predictor.persist()
+    else:
+        state.predictor = TabularPredictor.load(model_dir + "/opt")
+        state.predictor.persist()
+
     state.is_model_ready = True
     logging.info("Model loaded and ready to serve predictions.")
 
@@ -113,4 +123,10 @@ app = Litestar(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("predictor.main:app", host="0.0.0.0", port=_PORT, reload=False)
+    uvicorn.run(
+        "predictor.main:app",
+        host="0.0.0.0",
+        port=_PORT,
+        reload=False,
+        workers=4,
+    )

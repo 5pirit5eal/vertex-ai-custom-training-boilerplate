@@ -13,6 +13,7 @@ from trainer.config import Config, load_config
 from trainer.data import (
     convert_gs_to_gcs,
     load_data,
+    log_container_execution,
     log_learning_curves,
     log_nested_metrics,
     log_roc_curve,
@@ -61,10 +62,35 @@ def main():
     # Initialize the Vertex AI SDK
     if config.experiment_name:
         logging.info("Initializing Vertex AI SDK...")
+        existing_tensorboards = aiplatform.Tensorboard.list(
+            filter=f"display_name={config.experiment_name} AND labels.ytrue={config.label}",
+            location=config.region,
+            project=config.project_id,
+        )
+        if existing_tensorboards:
+            logging.info(
+                "Found existing Tensorboard for this experiment, using it: %s",
+                existing_tensorboards[0].name,
+            )
+            tensorboard = aiplatform.Tensorboard(
+                existing_tensorboards[0].resource_name
+            )
+        else:
+            logging.info(
+                "No existing Tensorboard found for this experiment, creating a new one."
+            )
+            tensorboard = aiplatform.Tensorboard.create(
+                display_name=config.experiment_name,
+                location=config.region,
+                project=config.project_id,
+                labels={"ytrue": config.label},
+            )
+
         aiplatform.init(
             project=config.project_id,
             location=config.region,
             experiment=config.experiment_name,
+            experiment_tensorboard=tensorboard,
             staging_bucket=convert_gs_to_gcs(config.model_export_uri),
         )
         if config.experiment_run_name:
@@ -103,7 +129,10 @@ def main():
         time_limit=config.time_limit,
         num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
         hyperparameters=config.hyperparameters,
-        # ag_args_ensemble=dict(fold_fitting_strategy="sequential_local"),
+        # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
+        ag_args_ensemble={
+            "fold_fitting_strategy": "sequential_local",
+        },  # Required as ray is incompatible with vertex ai custom training
         learning_curves=True,
     )
 
@@ -155,6 +184,7 @@ def main():
 
         write_df(config, predictor.leaderboard(), "leaderboard.csv")
         if config.calculate_importance:
+            logging.info("Calculating feature importance...")
             write_df(
                 config,
                 predictor.feature_importance(
@@ -166,6 +196,7 @@ def main():
                 "feature_importance.csv",
             )
 
+        logging.info("Writing metadata and learning curves to GCS...")
         summary = predictor.fit_summary(show_plot=False)
         del summary["leaderboard"]
         write_json(config, summary, "fit_summary.json")
@@ -175,9 +206,12 @@ def main():
         write_json(config, data=model_data, filename="model_data.json")
 
     if config.experiment_name:
-        logging.info("Logging metrics to Vertex AI...")
+        if model_data:
+            logging.info("Logging learning curves to Vertex AI...")
+            log_learning_curves(model_data)
+        else:
+            logging.info("No learning curves to log.")
 
-        log_learning_curves(model_data)
         if predictor.problem_type == "binary":
             logging.info("Logging ROC curve...")
             positive_class = predictor.positive_class
@@ -202,6 +236,8 @@ def main():
             matrix=confusion_matrix.to_numpy().tolist(),
             display_name="Confusion Matrix - " + config.label,
         )
+
+        log_container_execution(config)
 
         aiplatform.end_run()
 

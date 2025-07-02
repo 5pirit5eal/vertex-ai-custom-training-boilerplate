@@ -2,11 +2,15 @@ import json
 import logging
 import os
 import time
+import msgspec
 from fnmatch import fnmatch
 from typing import Any, Literal
 
 import pandas as pd
+from autogluon.tabular import TabularPredictor
+from autogluon.tabular.version import __version__ as autogluon_version
 from google.cloud import aiplatform, bigquery, storage
+from google.cloud.aiplatform.metadata.schema.system import execution_schema
 from numpy import inf, linspace
 from sklearn.metrics import roc_curve
 
@@ -300,3 +304,59 @@ def log_roc_curve(
     except Exception as e:
         logging.error(f"Error logging ROC curve: {e}")
         return
+
+
+def log_container_execution(config: Config) -> None:
+    """Logs the execution of a container to an aiplatform experiment.
+
+    Args:
+        config (Config): The configuration object containing the model export URI and label.
+    """
+    # TODO: Differentiate between Vertex Dataset and Custom Dataset
+    #       and use the correct schema for the input artifacts.
+    #       Currently, we use the system.Dataset schema for both.
+    input_artifacts = [
+        aiplatform.Artifact.create(
+            schema_title="system.Dataset",
+            uri=split[1],
+            metadata=dict(
+                payload_format=config.data_format.upper(),
+            ),
+            display_name=f"{split[0]} data for {config.label}",
+        )
+        for split in zip(
+            ["Train", "Validation", "Test"],
+            [config.train_data_uri, config.val_data_uri, config.test_data_uri],
+        )
+        if split[1] is not None
+    ]
+    model_artifact = aiplatform.Artifact.create(
+        schema_title="system.Model",
+        uri=config.model_export_uri,
+        display_name=f"AutoGluon model for {config.label}",
+        metadata=dict(
+            framework_version=autogluon_version,
+            framework="AutoGluon",
+        ),
+    )
+    with aiplatform.start_execution(
+        schema_title="system.ContainerExecution",
+        display_name="AutoGluon Training",
+    ) as execution:
+        # Log the execution
+        execution.assign_input_artifacts(input_artifacts)
+        execution.assign_output_artifacts([model_artifact])
+
+
+def write_parameters_and_result_schema(predictor: TabularPredictor) -> None:
+    """Creates and saves the parameters and results schema for the model
+    as YAML-files.
+
+    Args:
+        predictor (TabularPredictor): The predictor object containing the model parameters and results.
+    """
+    # TODO: Implement this function to write the parameters and results schema
+    # Create the yaml schema using the predictor
+    predictor.feature_metadata_in
+
+    raise NotImplementedError
