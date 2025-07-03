@@ -18,6 +18,7 @@ stored. If `model_path` is not provided, it defaults to '/autogluon/models'.
 import json
 import logging
 import os
+import random
 import threading
 
 import pandas as pd
@@ -42,6 +43,9 @@ OPTIMIZED_MODEL_DIR = "/tmp/opt/"
 
 def load_model(state: State) -> None:
     """Loads the model in a background thread."""
+    # Wait the thread for a random few seconds
+    threading.Event().wait(random.randint(1, 5))
+
     model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
     logging.info(f"Model directory passed by the user is: {model_dir}")
     if model_dir.startswith(GCS_URI_PREFIX):
@@ -56,7 +60,7 @@ def load_model(state: State) -> None:
             while not os.path.exists(
                 os.path.join(OPTIMIZED_MODEL_DIR, "version.txt")
             ):
-                logging.info(f"Waiting until Model is finished downloading...")
+                logging.info("Waiting until Model is finished downloading...")
                 threading.Event().wait(120)
         else:
             logging.info(f"Downloading {model_dir} to {local_model_dir}")

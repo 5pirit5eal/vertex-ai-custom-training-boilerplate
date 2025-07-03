@@ -1,6 +1,6 @@
-import fnmatch
-from google.cloud import storage
 import os
+
+from google.cloud import storage
 
 PROJECT_ID = os.getenv("PROJECT_ID")
 REGION = os.getenv("REGION")
