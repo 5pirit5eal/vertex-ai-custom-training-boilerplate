@@ -20,7 +20,7 @@ class Config(msgspec.Struct):
     val_data_uri: str | None
     test_data_uri: str | None
     model_import_uri: str | None
-    model_export_uri: str | None
+    model_export_uri: str
     checkpoint_uri: str | None
     tensorboard_log_uri: str | None
 

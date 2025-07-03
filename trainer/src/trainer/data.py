@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import msgspec
+import yaml
 from fnmatch import fnmatch
 from typing import Any, Literal
 
@@ -348,15 +349,45 @@ def log_container_execution(config: Config) -> None:
         execution.assign_output_artifacts([model_artifact])
 
 
-def write_parameters_and_result_schema(predictor: TabularPredictor) -> None:
+def write_parameters_and_result_schema(
+    config: Config, predictor: TabularPredictor
+) -> None:
     """Creates and saves the parameters and results schema for the model
     as YAML-files.
 
     Args:
         predictor (TabularPredictor): The predictor object containing the model parameters and results.
     """
-    # TODO: Implement this function to write the parameters and results schema
-    # Create the yaml schema using the predictor
-    predictor.feature_metadata_in
+    feature_metadata_dict = predictor.feature_metadata_in.to_dict()
 
-    raise NotImplementedError
+    type_map = {
+        "int": ("integer", "int64"),
+        "float": ("number", "float"),
+        "object": ("string", None),
+        "category": ("string", None),
+        "bool": ("boolean", None),
+        "datetime": ("string", "date-time"),
+        "text": ("string", None),
+    }
+    properties = {}
+    required = []
+    for feature, dtype in feature_metadata_dict.items():
+        openapi_type, openapi_format = type_map.get(dtype, ("string", None))
+        prop = {"type": openapi_type}
+        if openapi_format:
+            prop["format"] = openapi_format
+        properties[feature] = prop
+        required.append(feature)
+    schema = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
+
+    # Write the schema to a YAML file
+    schema_filename = os.path.join(
+        convert_gs_to_gcs(config.model_export_uri), "parameters_schema.yaml"
+    )
+    schema_path = os.path.join(predictor.path, schema_filename)
+    with open(schema_path, "w") as f:
+        yaml.dump(schema, f, sort_keys=False)

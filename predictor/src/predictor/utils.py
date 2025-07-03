@@ -4,9 +4,6 @@ import os
 
 PROJECT_ID = os.getenv("PROJECT_ID")
 REGION = os.getenv("REGION")
-BUCKET_URI = os.getenv(
-    "BUCKET_URI", "gs://fd-pubfox-adesso-tmp-20250505155632-7025"
-)
 
 
 def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
