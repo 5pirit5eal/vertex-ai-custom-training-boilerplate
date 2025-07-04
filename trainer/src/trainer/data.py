@@ -10,7 +10,6 @@ import yaml
 from autogluon.tabular import TabularPredictor
 from autogluon.tabular.version import __version__ as autogluon_version
 from google.cloud import aiplatform, bigquery, storage
-from google.cloud.aiplatform.metadata.schema.system import execution_schema
 from numpy import inf, linspace
 from sklearn.metrics import roc_curve
 
@@ -428,6 +427,7 @@ def write_instance_and_prediction_schemas(
             schema_path = os.path.join(
                 convert_gs_to_gcs(config.model_export_uri), filename
             )
+            os.makedirs(os.path.dirname(schema_path), exist_ok=True)
             with open(schema_path, "w") as f:
                 yaml.dump(schema, f, sort_keys=False)
     except Exception as e:

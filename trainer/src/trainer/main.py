@@ -18,6 +18,7 @@ from trainer.data import (
     log_nested_metrics,
     log_roc_curve,
     write_df,
+    write_instance_and_prediction_schemas,
     write_json,
 )
 
@@ -238,6 +239,10 @@ def main():
         )
 
         log_container_execution(config)
+        write_instance_and_prediction_schemas(
+            config=config,
+            predictor=predictor,
+        )
 
         aiplatform.end_run()
 
