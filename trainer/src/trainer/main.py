@@ -116,7 +116,7 @@ def main():
         predictor = TabularPredictor(
             label=config.label,
             eval_metric=config.eval_metric,
-            sample_weight="Weight" if "Weight" in train_df.columns else None,
+            sample_weight="weight" if "weight" in train_df.columns else None,  # type: ignore
             path=convert_gs_to_gcs(config.model_export_uri),
             log_to_file=False,
         )
