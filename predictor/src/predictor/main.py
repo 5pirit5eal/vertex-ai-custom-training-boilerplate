@@ -18,6 +18,7 @@ stored. If `model_path` is not provided, it defaults to '/autogluon/models'.
 import json
 import logging
 import os
+import random
 import threading
 
 import pandas as pd
@@ -37,23 +38,71 @@ from predictor.utils import download_gcs_dir_to_local
 _PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
 GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
+OPTIMIZED_MODEL_DIR = "/tmp/opt/"
 
 
 def load_model(state: State) -> None:
     """Loads the model in a background thread."""
+    # Wait the thread for a random few seconds
+    threading.Event().wait(random.randint(0, 5))
+
     model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
     logging.info(f"Model directory passed by the user is: {model_dir}")
     if model_dir.startswith(GCS_URI_PREFIX):
         gcs_path = model_dir[len(GCS_URI_PREFIX) :]
         local_model_dir = os.path.join(LOCAL_MODEL_DIR, gcs_path)
-        if not os.path.exists(local_model_dir):
+
+        if os.path.exists(local_model_dir):
+            # Other workers might be downloading the model, wait until it is available
+            while not os.path.exists(
+                os.path.join(OPTIMIZED_MODEL_DIR, "version.txt")
+            ):
+                logging.info("Waiting until Model is finished downloading...")
+                threading.Event().wait(120)
+        else:
             logging.info(f"Downloading {model_dir} to {local_model_dir}")
             download_gcs_dir_to_local(model_dir, local_model_dir)
-            model_dir = local_model_dir
-            logging.info(f"Finished downloading model to {model_dir}")
+            logging.info(f"Finished downloading model to {local_model_dir}")
+            model = TabularPredictor.load(local_model_dir)
+            logging.info(
+                f"Optimizing model from {local_model_dir} by cloning for deployment."
+            )
+            model.clone_for_deployment(
+                path=OPTIMIZED_MODEL_DIR,
+                dirs_exist_ok=True,
+            )
+    else:
+        logging.info(f"Model directory is local: {model_dir}")
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(
+                f"Model directory {model_dir} does not exist."
+            )
+        model = TabularPredictor.load(model_dir)
+        logging.info(
+            f"Optimizing model from {model_dir} by cloning for deployment."
+        )
+        model.clone_for_deployment(
+            path=OPTIMIZED_MODEL_DIR,
+            dirs_exist_ok=True,
+        )
 
     logging.info(f"Cuda available: {is_available()}")
-    state.predictor = TabularPredictor.load(model_dir)
+
+    not_loaded = True
+    while not_loaded:
+        try:
+            logging.info(
+                f"Trying to load optimized model from {OPTIMIZED_MODEL_DIR}"
+            )
+            state.predictor = TabularPredictor.load(OPTIMIZED_MODEL_DIR)
+            not_loaded = False
+        except Exception as e:
+            logging.error(f"Failed to load optimized model: {e}")
+            logging.info("Retrying in 5 seconds...")
+            threading.Event().wait(5)
+
+    # Ensure the predictor is ready for serving
+    state.predictor.persist()
     state.is_model_ready = True
     logging.info("Model loaded and ready to serve predictions.")
 
@@ -81,7 +130,12 @@ async def predict(request: Request, state: State) -> Response:
         instances = data.get("instances", [])
         df_to_predict = pd.DataFrame(instances)
         model: TabularPredictor = state.predictor
-        predictions: pd.DataFrame = model.predict_proba(df_to_predict)
+
+        if model.problem_type not in ["binary", "multiclass"]:
+            predictions: pd.DataFrame = model.predict(df_to_predict)
+        else:
+            predictions: pd.DataFrame = model.predict_proba(df_to_predict)
+
         response = {"predictions": predictions.to_dict(orient="records")}
         return Response(
             content=json.dumps(response),
@@ -113,4 +167,10 @@ app = Litestar(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("predictor.main:app", host="0.0.0.0", port=_PORT, reload=False)
+    uvicorn.run(
+        "predictor.main:app",
+        host="0.0.0.0",
+        port=_PORT,
+        reload=False,
+        workers=int(os.getenv("N_WORKERS", "4")),
+    )

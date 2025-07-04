@@ -6,8 +6,11 @@ from fnmatch import fnmatch
 from typing import Any, Literal
 
 import pandas as pd
+import yaml
+from autogluon.tabular import TabularPredictor
+from autogluon.tabular.version import __version__ as autogluon_version
 from google.cloud import aiplatform, bigquery, storage
-from numpy import inf
+from numpy import inf, linspace
 from sklearn.metrics import roc_curve
 
 from trainer.config import Config
@@ -73,6 +76,7 @@ def load_split_df(
             df = load_wildcard_csv(config, data_uri)
     else:
         logging.info(f"Loading {split} jsonl data from GCS")
+        # TODO: Implement JSONL loading
         raise ValueError(
             "JSONL format is not supported yet, and not used for Tabular Datasets."
         )
@@ -201,7 +205,7 @@ def write_json(
         with open(uri, "w") as f:
             json.dump(data, f, skipkeys=True)
     except Exception as e:
-        logging.error(f"Error writing JSON to {uri}: {e}")
+        logging.error(f"Error writing JSON to {uri}: {e}", exc_info=e)
         return
 
 
@@ -261,7 +265,7 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
 
 def log_roc_curve(
     label_column: str,
-    positive_class: str,
+    positive_class: str | int,
     test_df: pd.DataFrame,
     test_predictions: pd.DataFrame,
 ) -> None:
@@ -284,6 +288,13 @@ def log_roc_curve(
         tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
         threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
 
+        # Subsample the data to 1000 points for plotting
+        if len(fpr) > 1000:
+            indices = linspace(0, len(fpr) - 1, 1000, dtype=int)
+            fpr = fpr[indices]
+            tpr = tpr[indices]
+            threshold = threshold[indices]
+
         aiplatform.log_classification_metrics(
             fpr=fpr.tolist(),
             tpr=tpr.tolist(),
@@ -291,5 +302,134 @@ def log_roc_curve(
             display_name=f"ROC Curve - {positive_class}",
         )
     except Exception as e:
-        logging.error(f"Error logging ROC curve: {e}")
+        logging.error(f"Error logging ROC curve: {e}", exc_info=e)
+        return
+
+
+def log_container_execution(config: Config) -> None:
+    """Logs the execution of a container to an aiplatform experiment.
+
+    Args:
+        config (Config): The configuration object containing the model export URI and label.
+    """
+    # TODO: Differentiate between Vertex Dataset and Custom Dataset
+    #       and use the correct schema for the input artifacts.
+    #       Currently, we use the system.Dataset schema for both.
+    input_artifacts = [
+        aiplatform.Artifact.create(
+            schema_title="system.Dataset",
+            uri=split[1],
+            metadata=dict(
+                payload_format=config.data_format.upper(),
+            ),
+            display_name=f"{split[0]} data for {config.label}",
+        )
+        for split in zip(
+            ["Train", "Validation", "Test"],
+            [config.train_data_uri, config.val_data_uri, config.test_data_uri],
+        )
+        if split[1] is not None
+    ]
+    model_artifact = aiplatform.Artifact.create(
+        schema_title="system.Model",
+        uri=config.model_export_uri,
+        display_name=f"AutoGluon model for {config.label}",
+        metadata=dict(
+            framework_version=autogluon_version,
+            framework="AutoGluon",
+        ),
+    )
+    with aiplatform.start_execution(
+        schema_title="system.ContainerExecution",
+        display_name="AutoGluon Training",
+    ) as execution:
+        # Log the execution
+        execution.assign_input_artifacts(input_artifacts)
+        execution.assign_output_artifacts([model_artifact])
+
+
+def convert_feature_map_to_schema(
+    map: dict[str, tuple[str, tuple]],
+) -> dict[str, Any]:
+    type_map: dict[str, tuple[str, str | None]] = {
+        "int": ("integer", "int64"),
+        "float": ("number", "float"),
+        "object": ("string", None),
+        "category": ("string", None),
+        "bool": ("boolean", None),
+        "datetime": ("string", "date-time"),
+        "text": ("string", None),
+    }
+    properties = {}
+    required = []
+    for feature, dtype in map.items():
+        openapi_type, openapi_format = type_map.get(dtype[0], ("string", None))
+        prop = {"type": openapi_type}
+        if openapi_format:
+            prop["format"] = openapi_format
+        properties[feature] = prop
+        required.append(feature)
+    schema = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }
+    return schema
+
+
+def convert_class_labels_to_schema(
+    class_labels: list[str | int],
+) -> dict[str, Any]:
+    """Converts class labels to a schema for OpenAPI 3.0.2, matching a response of
+    a list of dicts where each dict has class labels as keys and probabilities as values.
+
+    Args:
+        class_labels (list[str | int]): The list of class labels.
+
+    Returns:
+        dict[str, Any]: The schema for the class labels.
+    """
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                str(label): {"type": "number"} for label in class_labels
+            },
+            "required": [str(label) for label in class_labels],
+            "additionalProperties": False,
+        },
+    }
+
+
+def write_instance_and_prediction_schemas(
+    config: Config, predictor: TabularPredictor
+) -> None:
+    """Creates and saves the parameters and results schema for the model
+    as YAML-files.
+
+    Args:
+        config (Config): The configuration object containing the model export URI.
+        predictor (TabularPredictor): The predictor object containing the model parameters and results.
+    """
+    try:
+        feature_metadata_dict = predictor.feature_metadata_in.to_dict()
+        classes = predictor.class_labels
+
+        feature_schema = convert_feature_map_to_schema(feature_metadata_dict)
+        label_schema = convert_class_labels_to_schema(classes)
+
+        # Write the schema to a YAML file
+        for schema, filename in [
+            (feature_schema, "instance_schema.yaml"),
+            (label_schema, "prediction_schema.yaml"),
+        ]:
+            schema_path = os.path.join(
+                convert_gs_to_gcs(config.model_export_uri), filename
+            )
+            os.makedirs(os.path.dirname(schema_path), exist_ok=True)
+            with open(schema_path, "w") as f:
+                yaml.dump(schema, f, sort_keys=False)
+    except Exception as e:
+        logging.error(f"Error writing schemas: {e}", exc_info=e)
         return
