@@ -44,14 +44,11 @@ OPTIMIZED_MODEL_DIR = "/tmp/opt/"
 def load_model(state: State) -> None:
     """Loads the model in a background thread."""
     # Wait the thread for a random few seconds
-    threading.Event().wait(random.randint(1, 5))
+    threading.Event().wait(random.randint(0, 5))
 
     model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
     logging.info(f"Model directory passed by the user is: {model_dir}")
     if model_dir.startswith(GCS_URI_PREFIX):
-        # Expect the model to be in a model/ subdirectory
-        if not model_dir.endswith("model/"):
-            model_dir = os.path.join(model_dir, "model/")
         gcs_path = model_dir[len(GCS_URI_PREFIX) :]
         local_model_dir = os.path.join(LOCAL_MODEL_DIR, gcs_path)
 

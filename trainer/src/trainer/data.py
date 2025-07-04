@@ -386,7 +386,7 @@ def write_parameters_and_result_schema(
 
     # Write the schema to a YAML file
     schema_filename = os.path.join(
-        convert_gs_to_gcs(config.model_export_uri), "parameters_schema.yaml"
+        convert_gs_to_gcs(config.model_export_uri), "instance_schema.yaml"
     )
     schema_path = os.path.join(predictor.path, schema_filename)
     with open(schema_path, "w") as f:
