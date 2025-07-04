@@ -2,12 +2,11 @@ import json
 import logging
 import os
 import time
-import msgspec
-import yaml
 from fnmatch import fnmatch
 from typing import Any, Literal
 
 import pandas as pd
+import yaml
 from autogluon.tabular import TabularPredictor
 from autogluon.tabular.version import __version__ as autogluon_version
 from google.cloud import aiplatform, bigquery, storage
@@ -78,6 +77,7 @@ def load_split_df(
             df = load_wildcard_csv(config, data_uri)
     else:
         logging.info(f"Loading {split} jsonl data from GCS")
+        # TODO: Implement JSONL loading
         raise ValueError(
             "JSONL format is not supported yet, and not used for Tabular Datasets."
         )
@@ -206,7 +206,7 @@ def write_json(
         with open(uri, "w") as f:
             json.dump(data, f, skipkeys=True)
     except Exception as e:
-        logging.error(f"Error writing JSON to {uri}: {e}")
+        logging.error(f"Error writing JSON to {uri}: {e}", exc_info=e)
         return
 
 
@@ -303,7 +303,7 @@ def log_roc_curve(
             display_name=f"ROC Curve - {positive_class}",
         )
     except Exception as e:
-        logging.error(f"Error logging ROC curve: {e}")
+        logging.error(f"Error logging ROC curve: {e}", exc_info=e)
         return
 
 
@@ -349,18 +349,10 @@ def log_container_execution(config: Config) -> None:
         execution.assign_output_artifacts([model_artifact])
 
 
-def write_parameters_and_result_schema(
-    config: Config, predictor: TabularPredictor
-) -> None:
-    """Creates and saves the parameters and results schema for the model
-    as YAML-files.
-
-    Args:
-        predictor (TabularPredictor): The predictor object containing the model parameters and results.
-    """
-    feature_metadata_dict = predictor.feature_metadata_in.to_dict()
-
-    type_map = {
+def convert_feature_map_to_schema(
+    map: dict[str, tuple[str, tuple]],
+) -> dict[str, Any]:
+    type_map: dict[str, tuple[str, str | None]] = {
         "int": ("integer", "int64"),
         "float": ("number", "float"),
         "object": ("string", None),
@@ -371,8 +363,8 @@ def write_parameters_and_result_schema(
     }
     properties = {}
     required = []
-    for feature, dtype in feature_metadata_dict.items():
-        openapi_type, openapi_format = type_map.get(dtype, ("string", None))
+    for feature, dtype in map.items():
+        openapi_type, openapi_format = type_map.get(dtype[0], ("string", None))
         prop = {"type": openapi_type}
         if openapi_format:
             prop["format"] = openapi_format
@@ -383,11 +375,61 @@ def write_parameters_and_result_schema(
         "properties": properties,
         "required": required,
     }
+    return schema
 
-    # Write the schema to a YAML file
-    schema_filename = os.path.join(
-        convert_gs_to_gcs(config.model_export_uri), "instance_schema.yaml"
-    )
-    schema_path = os.path.join(predictor.path, schema_filename)
-    with open(schema_path, "w") as f:
-        yaml.dump(schema, f, sort_keys=False)
+
+def convert_class_labels_to_schema(
+    class_labels: list[str | int],
+) -> dict[str, Any]:
+    """Converts class labels to a schema for OpenAPI 3.0.2, matching a response of
+    a list of dicts where each dict has class labels as keys and probabilities as values.
+
+    Args:
+        class_labels (list[str | int]): The list of class labels.
+
+    Returns:
+        dict[str, Any]: The schema for the class labels.
+    """
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                str(label): {"type": "number"} for label in class_labels
+            },
+            "required": [str(label) for label in class_labels],
+            "additionalProperties": False,
+        },
+    }
+
+
+def write_instance_and_prediction_schemas(
+    config: Config, predictor: TabularPredictor
+) -> None:
+    """Creates and saves the parameters and results schema for the model
+    as YAML-files.
+
+    Args:
+        config (Config): The configuration object containing the model export URI.
+        predictor (TabularPredictor): The predictor object containing the model parameters and results.
+    """
+    try:
+        feature_metadata_dict = predictor.feature_metadata_in.to_dict()
+        classes = predictor.class_labels
+
+        feature_schema = convert_feature_map_to_schema(feature_metadata_dict)
+        label_schema = convert_class_labels_to_schema(classes)
+
+        # Write the schema to a YAML file
+        for schema, filename in [
+            (feature_schema, "instance_schema.yaml"),
+            (label_schema, "prediction_schema.yaml"),
+        ]:
+            schema_path = os.path.join(
+                convert_gs_to_gcs(config.model_export_uri), filename
+            )
+            with open(schema_path, "w") as f:
+                yaml.dump(schema, f, sort_keys=False)
+    except Exception as e:
+        logging.error(f"Error writing schemas: {e}", exc_info=e)
+        return
