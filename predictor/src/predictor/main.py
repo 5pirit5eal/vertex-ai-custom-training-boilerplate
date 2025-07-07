@@ -27,6 +27,7 @@ from litestar import Litestar, Request, Response, get, post
 from litestar.datastructures import State
 from litestar.status_codes import (
     HTTP_200_OK,
+    HTTP_400_BAD_REQUEST,
     HTTP_500_INTERNAL_SERVER_ERROR,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
@@ -38,7 +39,6 @@ from predictor.utils import download_gcs_dir_to_local
 _PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
 GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
-OPTIMIZED_MODEL_DIR = "/tmp/opt/"
 
 
 def load_model(state: State) -> None:
@@ -55,7 +55,7 @@ def load_model(state: State) -> None:
         if os.path.exists(local_model_dir):
             # Other workers might be downloading the model, wait until it is available
             while not os.path.exists(
-                os.path.join(OPTIMIZED_MODEL_DIR, "version.txt")
+                os.path.join(local_model_dir, "version.txt")
             ):
                 logging.info("Waiting until Model is finished downloading...")
                 threading.Event().wait(120)
@@ -63,43 +63,18 @@ def load_model(state: State) -> None:
             logging.info(f"Downloading {model_dir} to {local_model_dir}")
             download_gcs_dir_to_local(model_dir, local_model_dir)
             logging.info(f"Finished downloading model to {local_model_dir}")
-            model = TabularPredictor.load(local_model_dir)
-            logging.info(
-                f"Optimizing model from {local_model_dir} by cloning for deployment."
-            )
-            model.clone_for_deployment(
-                path=OPTIMIZED_MODEL_DIR,
-                dirs_exist_ok=True,
-            )
+
+        state.predictor = TabularPredictor.load(local_model_dir)
+
     else:
         logging.info(f"Model directory is local: {model_dir}")
         if not os.path.exists(model_dir):
             raise FileNotFoundError(
                 f"Model directory {model_dir} does not exist."
             )
-        model = TabularPredictor.load(model_dir)
-        logging.info(
-            f"Optimizing model from {model_dir} by cloning for deployment."
-        )
-        model.clone_for_deployment(
-            path=OPTIMIZED_MODEL_DIR,
-            dirs_exist_ok=True,
-        )
+        state.predictor = TabularPredictor.load(model_dir)
 
     logging.info(f"Cuda available: {is_available()}")
-
-    not_loaded = True
-    while not_loaded:
-        try:
-            logging.info(
-                f"Trying to load optimized model from {OPTIMIZED_MODEL_DIR}"
-            )
-            state.predictor = TabularPredictor.load(OPTIMIZED_MODEL_DIR)
-            not_loaded = False
-        except Exception as e:
-            logging.error(f"Failed to load optimized model: {e}")
-            logging.info("Retrying in 5 seconds...")
-            threading.Event().wait(5)
 
     # Ensure the predictor is ready for serving
     state.predictor.persist()
@@ -132,7 +107,11 @@ async def predict(request: Request, state: State) -> Response:
         model: TabularPredictor = state.predictor
 
         if model.problem_type not in ["binary", "multiclass"]:
-            predictions: pd.DataFrame = model.predict(df_to_predict)
+            return Response(
+                content=json.dumps({"error": "Unsupported problem type"}),
+                status_code=HTTP_400_BAD_REQUEST,
+                media_type="application/json",
+            )
         else:
             predictions: pd.DataFrame = model.predict_proba(df_to_predict)
 

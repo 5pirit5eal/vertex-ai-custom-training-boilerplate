@@ -11,10 +11,10 @@ from google.cloud import aiplatform
 
 from trainer.config import Config, load_config
 from trainer.data import (
-    convert_gs_to_gcs,
+    gcs_path,
     load_data,
     log_container_execution,
-    log_learning_curves,
+    log_metadata,
     log_nested_metrics,
     log_roc_curve,
     write_df,
@@ -49,9 +49,7 @@ def main():
     )
 
     # Add file handler to write logs to a file in the logging directory
-    log_path = os.path.join(
-        convert_gs_to_gcs(config.tensorboard_log_uri), "training.log"
-    )
+    log_path = gcs_path(config.tensorboard_log_uri, "training.log")
     file_handler = logging.FileHandler(log_path)
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger().addHandler(file_handler)
@@ -85,6 +83,7 @@ def main():
                 location=config.region,
                 project=config.project_id,
                 labels={"ytrue": config.label},
+                is_default=True,
             )
 
         aiplatform.init(
@@ -92,7 +91,7 @@ def main():
             location=config.region,
             experiment=config.experiment_name,
             experiment_tensorboard=tensorboard,
-            staging_bucket=convert_gs_to_gcs(config.model_export_uri),
+            staging_bucket=gcs_path(config.model_export_uri),
         )
         if config.experiment_run_name:
             aiplatform.start_run(config.experiment_run_name)
@@ -106,41 +105,82 @@ def main():
     logging.info("Loading data...")
     train_df, val_df, test_df = load_data(config)
 
+    if config.weight_column not in train_df.columns:
+        logging.info(
+            f"Weight column '{config.weight_column}' not found in training data. No weighting will be applied."
+        )
+
     # Create a TabularPredictor.
     if config.model_import_uri is not None:
         logging.info("Importing model from checkpoint...")
         predictor: TabularPredictor = TabularPredictor.load(
             config.model_import_uri
         )
+    elif config.checkpoint_uri is not None and os.path.exists(
+        gcs_path(config.checkpoint_uri, "fit")
+    ):
+        predictor = TabularPredictor.load(
+            gcs_path(config.checkpoint_uri, "fit")
+        )
     else:
         predictor = TabularPredictor(
             label=config.label,
             eval_metric=config.eval_metric,
-            sample_weight="weight" if "weight" in train_df.columns else None,  # type: ignore
-            path=convert_gs_to_gcs(config.model_export_uri),
+            sample_weight=config.weight_column
+            if config.weight_column in train_df.columns
+            else None,  # type: ignore
+            path=gcs_path(config.checkpoint_uri, "fit"),
             log_to_file=False,
         )
 
-    # Fit the model
-    logging.info("Fitting model...")
-    predictor.fit(
-        train_data=train_df,
-        tuning_data=val_df,
-        presets=config.presets,
-        time_limit=config.time_limit,
-        num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
-        hyperparameters=config.hyperparameters,
-        # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
-        ag_args_ensemble={
-            "fold_fitting_strategy": "sequential_local",
-        },  # Required as ray is incompatible with vertex ai custom training
-        learning_curves=True,
+        # Fit the model
+        logging.info("Fitting model...")
+        predictor.fit(
+            train_data=train_df,
+            tuning_data=val_df,
+            presets=config.presets,
+            time_limit=config.time_limit,
+            num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
+            hyperparameters=config.hyperparameters,
+            # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
+            ag_args_ensemble={
+                "fold_fitting_strategy": "sequential_local",
+            },  # Required as ray is incompatible with vertex ai custom training
+            learning_curves=True,
+        )
+
+        log_metadata(
+            config=config,
+            predictor=predictor,
+            prefix="train",
+        )
+
+    # Refit the model on the train and validation data
+    logging.info("Refitting model on full training data...")
+    predictor_refit: TabularPredictor = predictor.clone(
+        path=gcs_path(config.checkpoint_uri, "refit_full"),
+        return_clone=True,
+        dirs_exist_ok=True,
+    )
+
+    predictor_refit.refit_full(fit_strategy="auto")
+
+    logging.info("Exporting deployment model for inference...")
+    predictor.clone_for_deployment(
+        path=gcs_path(config.model_export_uri),
+        dirs_exist_ok=True,
+    )
+
+    log_metadata(
+        config=config,
+        predictor=predictor_refit,
+        prefix="refit_full",
     )
 
     # Predict on the test data
     logging.info("Predicting on test data and writing results...")
     if test_df is not None:
-        test_predictions: pd.DataFrame = predictor.predict_proba(test_df)  # type: ignore
+        test_predictions: pd.DataFrame = predictor_refit.predict_proba(test_df)  # type: ignore
         # Write the predictions to a CSV file in GCS
         write_df(
             config=config,
@@ -149,7 +189,7 @@ def main():
         )
 
         # Evaulate the model
-        test_evaluation = predictor.evaluate_predictions(
+        test_evaluation = predictor_refit.evaluate_predictions(
             y_true=test_df[config.label],
             y_pred=test_predictions,
             display=True,
@@ -180,51 +220,29 @@ def main():
             )
             log_nested_metrics(classification_report)
             # Remove the confusion matrix from the evaluation metrics
+            # as this format is not supported by Vertex AI Experiments
             test_evaluation.pop("confusion_matrix", None)
             aiplatform.log_metrics(test_evaluation)
 
-        write_df(config, predictor.leaderboard(), "leaderboard.csv")
-        if config.calculate_importance:
-            logging.info("Calculating feature importance...")
-            write_df(
-                config,
-                predictor.feature_importance(
-                    test_df,
-                    time_limit=0.2 * config.time_limit  # type: ignore
-                    if config.time_limit
-                    else None,
-                ),
-                "feature_importance.csv",
-            )
-
-        logging.info("Writing metadata and learning curves to GCS...")
-        summary = predictor.fit_summary(show_plot=False)
-        del summary["leaderboard"]
-        write_json(config, summary, "fit_summary.json")
-
-        metadata, model_data = predictor.learning_curves()
-        write_json(config, data=metadata, filename="metadata.json")
-        write_json(config, data=model_data, filename="model_data.json")
+        write_df(
+            config,
+            predictor_refit.leaderboard(test_df, refit_full=True, display=True),
+            "test_leaderboard.csv",
+        )
 
     if config.experiment_name:
-        if model_data:
-            logging.info("Logging learning curves to Vertex AI...")
-            log_learning_curves(model_data)
-        else:
-            logging.info("No learning curves to log.")
-
-        if predictor.problem_type == "binary":
+        if predictor_refit.problem_type == "binary":
             logging.info("Logging ROC curve...")
-            positive_class = predictor.positive_class
+            positive_class = predictor_refit.positive_class
             log_roc_curve(
                 label_column=config.label,
                 positive_class=positive_class,
                 test_df=test_df,
                 test_predictions=test_predictions,
             )
-        elif predictor.problem_type == "multiclass":
+        elif predictor_refit.problem_type == "multiclass":
             logging.info("Logging multiclass ROC curve...")
-            for class_label in predictor.class_labels:
+            for class_label in predictor_refit.class_labels:
                 log_roc_curve(
                     label_column=config.label,
                     positive_class=class_label,
@@ -241,9 +259,27 @@ def main():
         log_container_execution(config)
         write_instance_and_prediction_schemas(
             config=config,
-            predictor=predictor,
+            predictor=predictor_refit,
         )
 
+        # Do feature importance calculation last, as it can be time-consuming
+        # and we want to ensure all other metrics are logged first.
+        if config.calculate_importance:
+            logging.info(
+                "Calculating and writing feature importance dataframe..."
+            )
+            write_df(
+                config,
+                predictor_refit.feature_importance(
+                    test_df,
+                    time_limit=0.2 * config.time_limit  # type: ignore
+                    if config.time_limit
+                    else None,
+                ),
+                "test_feature_importance.csv",
+            )
+
+        logging.info(f"{config.experiment_name} completed successfully.")
         aiplatform.end_run()
 
 
