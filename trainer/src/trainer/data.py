@@ -26,13 +26,33 @@ def get_gcs_client(config: Config) -> storage.Client:
     return storage.Client(project=config.project_id)
 
 
-def convert_gs_to_gcs(uri: str) -> str:
-    """Converts a Google Cloud Storage URI to a Google Cloud Storage FUSE path."""
+def gcs_path(uri: str, *path_segments: str) -> str:
+    """Converts a Google Cloud Storage URI to a Google Cloud Storage FUSE path.
+
+    Args:
+        uri (str): The GCS URI to convert (e.g., "gs://bucket/path").
+        *path_segments (str): Optional path segments to join to the converted path.
+
+    Returns:
+        str: The GCS FUSE path with any additional path segments joined.
+
+    Example:
+        gcs_path("gs://my-bucket/data") -> "/gcs/my-bucket/data"
+        gcs_path("gs://my-bucket/data", "file.csv") -> "/gcs/my-bucket/data/file.csv"
+        gcs_path("gs://my-bucket", "folder", "subfolder", "file.txt") -> "/gcs/my-bucket/folder/subfolder/file.txt"
+    """
     uri = uri.strip()
-    if uri.startswith("gs://"):
-        return "/gcs/" + uri[5:]
-    else:
+    if not uri.startswith("gs://"):
         raise ValueError(f"Invalid GCS URI: {uri}")
+
+    # Convert gs:// to /gcs/
+    base_path = "/gcs/" + uri[5:]
+
+    # Join any additional path segments
+    if path_segments:
+        return os.path.join(base_path, *path_segments)
+
+    return base_path
 
 
 def load_split_df(
@@ -60,6 +80,9 @@ def load_split_df(
         case _:
             raise ValueError(f"Invalid split: {split}")
 
+    if data_uri is None:
+        raise ValueError(f"No {split} data URI provided, cannot load data.")
+
     if config.data_format == "bigquery":
         logging.info(f"Loading {split} data from BigQuery")
         client = get_bigquery_client(config)
@@ -69,7 +92,7 @@ def load_split_df(
         logging.info(f"Loading {split} csv data from GCS")
         # Load data from GCS
         try:
-            uri = convert_gs_to_gcs(data_uri)
+            uri = gcs_path(data_uri)
 
             df = pd.read_csv(uri)
         except Exception:
@@ -78,7 +101,8 @@ def load_split_df(
         logging.info(f"Loading {split} jsonl data from GCS")
         # TODO: Implement JSONL loading
         raise ValueError(
-            "JSONL format is not supported yet, and not used for Tabular Datasets."
+            "JSONL format is not supported yet, and not used for Vertex AI Tabular Datasets. "
+            "Checkout multimodal training in tabular format on https://auto.gluon.ai."
         )
     return df.reset_index(drop=True)
 
@@ -106,7 +130,7 @@ def load_wildcard_csv(config: Config, uri: str) -> pd.DataFrame:
     # Load each CSV file into a DataFrame and concatenate them
     return pd.concat(
         [
-            pd.read_csv(convert_gs_to_gcs(f"gs://{bucket.name}/{blob.name}"))
+            pd.read_csv(gcs_path(f"gs://{bucket.name}/{blob.name}"))
             for blob in blobs
             if fnmatch(blob.name, prefix)
         ],
@@ -169,13 +193,11 @@ def write_df(
         df (pd.DataFrame): The DataFrame to write.
         filename (str): The filename to write to.
     """
-    # Convert the GCS URI to a GCS FUSE path
-    uri = convert_gs_to_gcs(config.tensorboard_log_uri)
+    # Convert the GCS URI to a GCS FUSE path and join with filename
+    uri = gcs_path(config.tensorboard_log_uri, filename)
 
     # Create the directory if it doesn't exist
-    os.makedirs(uri, exist_ok=True)
-
-    uri = uri + "/" + filename
+    os.makedirs(os.path.dirname(uri), exist_ok=True)
 
     # Write the DataFrame to a CSV file in GCS
     df.to_csv(uri)
@@ -192,13 +214,11 @@ def write_json(
         data (dict): The dict to write.
         filename (str): The filename to write to.
     """
-    # Convert the GCS URI to a GCS FUSE path
-    uri = convert_gs_to_gcs(config.tensorboard_log_uri)
+    # Convert the GCS URI to a GCS FUSE path and join with filename
+    uri = gcs_path(config.tensorboard_log_uri, filename)
 
     # Create the directory if it doesn't exist
-    os.makedirs(uri, exist_ok=True)
-
-    uri = uri + "/" + filename
+    os.makedirs(os.path.dirname(uri), exist_ok=True)
 
     # Write the dict to a JSON file in GCS
     try:
@@ -445,9 +465,7 @@ def write_instance_and_prediction_schemas(
             (feature_schema, "instance_schema.yaml"),
             (label_schema, "prediction_schema.yaml"),
         ]:
-            schema_path = os.path.join(
-                convert_gs_to_gcs(config.model_export_uri), filename
-            )
+            schema_path = gcs_path(config.model_export_uri, filename)
             os.makedirs(os.path.dirname(schema_path), exist_ok=True)
             with open(schema_path, "w") as f:
                 yaml.dump(schema, f, sort_keys=False)

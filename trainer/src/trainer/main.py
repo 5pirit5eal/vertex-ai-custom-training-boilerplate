@@ -11,7 +11,7 @@ from google.cloud import aiplatform
 
 from trainer.config import Config, load_config
 from trainer.data import (
-    convert_gs_to_gcs,
+    gcs_path,
     load_data,
     log_container_execution,
     log_metadata,
@@ -49,9 +49,7 @@ def main():
     )
 
     # Add file handler to write logs to a file in the logging directory
-    log_path = os.path.join(
-        convert_gs_to_gcs(config.tensorboard_log_uri), "training.log"
-    )
+    log_path = gcs_path(config.tensorboard_log_uri, "training.log")
     file_handler = logging.FileHandler(log_path)
     file_handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger().addHandler(file_handler)
@@ -93,7 +91,7 @@ def main():
             location=config.region,
             experiment=config.experiment_name,
             experiment_tensorboard=tensorboard,
-            staging_bucket=convert_gs_to_gcs(config.model_export_uri),
+            staging_bucket=gcs_path(config.model_export_uri),
         )
         if config.experiment_run_name:
             aiplatform.start_run(config.experiment_run_name)
@@ -119,10 +117,10 @@ def main():
             config.model_import_uri
         )
     elif config.checkpoint_uri is not None and os.path.exists(
-        os.path.join(convert_gs_to_gcs(config.checkpoint_uri), "fit")
+        gcs_path(config.checkpoint_uri, "fit")
     ):
         predictor = TabularPredictor.load(
-            os.path.join(convert_gs_to_gcs(config.checkpoint_uri), "fit")
+            gcs_path(config.checkpoint_uri, "fit")
         )
     else:
         predictor = TabularPredictor(
@@ -131,7 +129,7 @@ def main():
             sample_weight=config.weight_column
             if config.weight_column in train_df.columns
             else None,  # type: ignore
-            path=os.path.join(convert_gs_to_gcs(config.checkpoint_uri), "fit"),
+            path=gcs_path(config.checkpoint_uri, "fit"),
             log_to_file=False,
         )
 
@@ -160,9 +158,7 @@ def main():
     # Refit the model on the train and validation data
     logging.info("Refitting model on full training data...")
     predictor_refit: TabularPredictor = predictor.clone(
-        path=os.path.join(
-            convert_gs_to_gcs(config.checkpoint_uri), "refit_full"
-        ),
+        path=gcs_path(config.checkpoint_uri, "refit_full"),
         return_clone=True,
         dirs_exist_ok=True,
     )
@@ -171,7 +167,7 @@ def main():
 
     logging.info("Exporting deployment model for inference...")
     predictor.clone_for_deployment(
-        path=convert_gs_to_gcs(config.model_export_uri),
+        path=gcs_path(config.model_export_uri),
         dirs_exist_ok=True,
     )
 

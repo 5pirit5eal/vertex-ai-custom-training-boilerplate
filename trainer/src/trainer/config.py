@@ -21,8 +21,8 @@ class Config(msgspec.Struct):
     test_data_uri: str | None
     model_import_uri: str | None
     model_export_uri: str
-    checkpoint_uri: str | None
-    tensorboard_log_uri: str | None
+    checkpoint_uri: str
+    tensorboard_log_uri: str
 
     # Model training variables
     time_limit: int | None
@@ -34,7 +34,7 @@ class Config(msgspec.Struct):
     calculate_importance: bool = False
     hyperparameters: dict[str, Any] | None = None
     multimodal: bool = False
-    weight_column: str | None = None
+    weight_column: str = "weight"
 
     # Vertex AI experiment variables
     experiment_name: str | None = None
@@ -62,12 +62,23 @@ class Config(msgspec.Struct):
                     raise ValueError(
                         f"Invalid data URI for {self.data_format}: {uri}"
                     )
-        if (
-            self.tensorboard_log_uri is None
-            and self.model_export_uri is not None
-        ):
+
+        if self.model_export_uri is None:
+            raise ValueError(
+                "Model export URI must be provided. Set AIP_MODEL_DIR environment variable or provide it as an arg."
+            )
+
+        if self.tensorboard_log_uri is None:
             # If no tensorboard log URI is provided, use the model export URI
-            self.tensorboard_log_uri = self.model_export_uri
+            self.tensorboard_log_uri = os.path.join(
+                self.model_export_uri, "logs"
+            )
+
+        if self.checkpoint_uri is None:
+            # If no tensorboard log URI is provided, use the model export URI
+            self.tensorboard_log_uri = os.path.join(
+                self.model_export_uri, "ckpt"
+            )
 
         # Create the necessary folders
         for uri in [
