@@ -263,6 +263,27 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
         return
 
 
+def log_metadata(
+    config: Config, predictor: TabularPredictor, prefix: str = ""
+) -> None:
+    """Logs metadata about the run to GCS."""
+    logging.info("Writing metadata and learning curves to GCS...")
+    summary = predictor.fit_summary(show_plot=False)
+    del summary["leaderboard"]
+    write_json(config, summary, f"{prefix}_fit_summary.json")
+
+    metadata, model_data = predictor.learning_curves()
+    write_json(config, data=metadata, filename=f"{prefix}_metadata.json")
+    write_json(config, data=model_data, filename=f"{prefix}_model_data.json")
+
+    if config.experiment_name:
+        if model_data:
+            logging.info(f"Logging {prefix} learning curves to Vertex AI...")
+            log_learning_curves(model_data)
+        else:
+            logging.info(f"No {prefix} learning curves to log.")
+
+
 def log_roc_curve(
     label_column: str,
     positive_class: str | int,

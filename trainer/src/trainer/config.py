@@ -34,6 +34,7 @@ class Config(msgspec.Struct):
     calculate_importance: bool = False
     hyperparameters: dict[str, Any] | None = None
     multimodal: bool = False
+    weight_column: str | None = None
 
     # Vertex AI experiment variables
     experiment_name: str | None = None
@@ -221,6 +222,11 @@ class Config(msgspec.Struct):
     help="Calculate feature importance",
     is_flag=True,
     default=False,
+)
+@click.option(
+    "--weight-column",
+    help="Weight column name for the training data",
+    default="weight",
 )
 @click.option(
     "--experiment-name",

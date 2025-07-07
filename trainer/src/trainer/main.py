@@ -14,7 +14,7 @@ from trainer.data import (
     convert_gs_to_gcs,
     load_data,
     log_container_execution,
-    log_learning_curves,
+    log_metadata,
     log_nested_metrics,
     log_roc_curve,
     write_df,
@@ -26,27 +26,6 @@ from trainer.data import (
 # Generate a uuid of length 8
 def generate_uuid():
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-
-
-def log_metadata(
-    config: Config, predictor: TabularPredictor, prefix: str = ""
-) -> None:
-    """Logs metadata about the run to GCS."""
-    logging.info("Writing metadata and learning curves to GCS...")
-    summary = predictor.fit_summary(show_plot=False)
-    del summary["leaderboard"]
-    write_json(config, summary, f"{prefix}_fit_summary.json")
-
-    metadata, model_data = predictor.learning_curves()
-    write_json(config, data=metadata, filename=f"{prefix}_metadata.json")
-    write_json(config, data=model_data, filename=f"{prefix}_model_data.json")
-
-    if config.experiment_name:
-        if model_data:
-            logging.info(f"Logging {prefix} learning curves to Vertex AI...")
-            log_learning_curves(model_data)
-        else:
-            logging.info(f"No {prefix} learning curves to log.")
 
 
 def main():
@@ -128,6 +107,11 @@ def main():
     logging.info("Loading data...")
     train_df, val_df, test_df = load_data(config)
 
+    if config.weight_column not in train_df.columns:
+        logging.info(
+            f"Weight column '{config.weight_column}' not found in training data. No weighting will be applied."
+        )
+
     # Create a TabularPredictor.
     if config.model_import_uri is not None:
         logging.info("Importing model from checkpoint...")
@@ -144,7 +128,9 @@ def main():
         predictor = TabularPredictor(
             label=config.label,
             eval_metric=config.eval_metric,
-            sample_weight="weight" if "weight" in train_df.columns else None,  # type: ignore
+            sample_weight=config.weight_column
+            if config.weight_column in train_df.columns
+            else None,  # type: ignore
             path=os.path.join(convert_gs_to_gcs(config.checkpoint_uri), "fit"),
             log_to_file=False,
         )
@@ -238,6 +224,7 @@ def main():
             )
             log_nested_metrics(classification_report)
             # Remove the confusion matrix from the evaluation metrics
+            # as this format is not supported by Vertex AI Experiments
             test_evaluation.pop("confusion_matrix", None)
             aiplatform.log_metrics(test_evaluation)
 
@@ -246,18 +233,6 @@ def main():
             predictor_refit.leaderboard(test_df, refit_full=True, display=True),
             "test_leaderboard.csv",
         )
-        if config.calculate_importance:
-            logging.info("Calculating feature importance...")
-            write_df(
-                config,
-                predictor_refit.feature_importance(
-                    test_df,
-                    time_limit=0.2 * config.time_limit  # type: ignore
-                    if config.time_limit
-                    else None,
-                ),
-                "test_feature_importance.csv",
-            )
 
     if config.experiment_name:
         if predictor_refit.problem_type == "binary":
@@ -291,6 +266,24 @@ def main():
             predictor=predictor_refit,
         )
 
+        # Do feature importance calculation last, as it can be time-consuming
+        # and we want to ensure all other metrics are logged first.
+        if config.calculate_importance:
+            logging.info(
+                "Calculating and writing feature importance dataframe..."
+            )
+            write_df(
+                config,
+                predictor_refit.feature_importance(
+                    test_df,
+                    time_limit=0.2 * config.time_limit  # type: ignore
+                    if config.time_limit
+                    else None,
+                ),
+                "test_feature_importance.csv",
+            )
+
+        logging.info(f"{config.experiment_name} completed successfully.")
         aiplatform.end_run()
 
 
