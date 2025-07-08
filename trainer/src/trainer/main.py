@@ -225,18 +225,24 @@ def main():
 
 
 def evaluate_df(
-    config: Config, df: pd.DataFrame, predictor: TabularPredictor, prefix: str
+    config: Config,
+    df: pd.DataFrame,
+    predictor: TabularPredictor,
+    prefix: str,
+    save_predictions: bool = True,
 ) -> None:
     """Evaluates the model on the given DataFrame and writes the results to GCS."""
     predictions: pd.DataFrame = predictor.predict_proba(df)  # type: ignore
-    # Write the predictions to a CSV file in GCS
-    write_df(
-        config=config,
-        df=predictions,
-        filename=f"{prefix}_predictions.csv",
-    )
+    if save_predictions:
+        # Write the predictions to a CSV file in GCS
+        write_df(
+            config=config,
+            df=predictions,
+            filename=f"{prefix}_predictions.csv",
+        )
 
-    # Evaulate the model
+    logging.info(f"Evaluating {prefix} data...")
+    # Evaluate the model
     evaluation = predictor.evaluate_predictions(
         y_true=df[config.label],
         y_pred=predictions,
@@ -254,6 +260,7 @@ def evaluate_df(
     )
 
     # Write the evaluation to a CSV file in GCS
+    logging.info(f"Writing {prefix} evaluation results to GCS...")
     write_json(
         config=config,
         data=evaluation,
@@ -278,7 +285,7 @@ def evaluate_df(
 
     if config.experiment_name:
         if predictor.problem_type == "binary":
-            logging.info("Logging ROC curve...")
+            logging.info(f"Logging {prefix} ROC curve...")
             positive_class = predictor.positive_class
             log_roc_curve(
                 label_column=config.label,
@@ -288,7 +295,7 @@ def evaluate_df(
                 prefix=prefix,
             )
         elif predictor.problem_type == "multiclass":
-            logging.info("Logging multiclass ROC curve...")
+            logging.info(f"Logging {prefix} multiclass ovr ROC curves...")
             for class_label in predictor.class_labels:
                 log_roc_curve(
                     label_column=config.label,
