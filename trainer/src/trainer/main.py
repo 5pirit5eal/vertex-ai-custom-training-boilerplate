@@ -13,13 +13,14 @@ from trainer.config import Config, load_config
 from trainer.data import (
     gcs_path,
     load_data,
-    log_container_execution,
-    log_metadata,
-    log_nested_metrics,
-    log_roc_curve,
     write_df,
     write_instance_and_prediction_schemas,
     write_json,
+)
+from trainer.logging import (
+    log_metadata,
+    log_nested_metrics,
+    log_roc_curve,
 )
 
 
@@ -133,135 +134,70 @@ def main():
             log_to_file=False,
         )
 
-        # Fit the model
-        logging.info("Fitting model...")
-        predictor.fit(
-            train_data=train_df,
-            tuning_data=val_df,
-            presets=config.presets,
-            time_limit=config.time_limit,
-            num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
-            hyperparameters=config.hyperparameters,
-            # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
-            ag_args_ensemble={
-                "fold_fitting_strategy": "sequential_local",
-            },  # Required as ray is incompatible with vertex ai custom training
-            learning_curves=True,
-        )
-
-        log_metadata(
-            config=config,
-            predictor=predictor,
-            prefix="train",
-        )
-
-    # Refit the model on the train and validation data
-    logging.info("Refitting model on full training data...")
-    predictor_refit: TabularPredictor = predictor.clone(
-        path=gcs_path(config.checkpoint_uri, "refit_full"),
-        return_clone=True,
-        dirs_exist_ok=True,
-    )
-
-    predictor_refit.refit_full(fit_strategy="auto")
-
-    logging.info("Exporting deployment model for inference...")
-    predictor.clone_for_deployment(
-        path=gcs_path(config.model_export_uri),
-        dirs_exist_ok=True,
+    # Fit the model
+    logging.info("Fitting model...")
+    predictor.fit(
+        train_data=train_df,
+        tuning_data=val_df,
+        presets=config.presets,
+        time_limit=config.time_limit,
+        num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
+        hyperparameters=config.hyperparameters,
+        # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
+        ag_args_ensemble={
+            "fold_fitting_strategy": "sequential_local",
+        },  # Required as ray is incompatible with vertex ai custom training
+        learning_curves=True,
     )
 
     log_metadata(
         config=config,
-        predictor=predictor_refit,
-        prefix="refit_full",
+        predictor=predictor,
+        prefix="train",
     )
 
-    # Predict on the test data
-    logging.info("Predicting on test data and writing results...")
-    if test_df is not None:
-        test_predictions: pd.DataFrame = predictor_refit.predict_proba(test_df)  # type: ignore
-        # Write the predictions to a CSV file in GCS
-        write_df(
-            config=config,
-            df=test_predictions,
-            filename="test_predictions.csv",
+    if config.refit_full:
+        # Refit the model on the train and validation data
+        logging.info("Refitting model on full training data...")
+        predictor_refit: TabularPredictor = predictor.clone(
+            path=gcs_path(config.checkpoint_uri, "refit_full"),
+            return_clone=True,
+            dirs_exist_ok=True,
         )
 
-        # Evaulate the model
-        test_evaluation = predictor_refit.evaluate_predictions(
-            y_true=test_df[config.label],
-            y_pred=test_predictions,
-            display=True,
-            auxiliary_metrics=True,
-            detailed_report=True,
+        predictor_refit.refit_full(fit_strategy="auto")
+
+        logging.info("Exporting refit deployment model for inference...")
+        predictor_refit.clone_for_deployment(
+            path=gcs_path(config.model_export_uri),
+            dirs_exist_ok=True,
         )
+        predictor_test = predictor_refit
 
-        confusion_matrix: pd.DataFrame = test_evaluation.pop(
-            "confusion_matrix", None
-        )
-
-        test_evaluation["confusion_matrix"] = (
-            confusion_matrix.to_dict(orient="list")
-            if confusion_matrix is not None
-            else None
-        )
-
-        # Write the evaluation to a CSV file in GCS
-        write_json(
-            config=config,
-            data=test_evaluation,
-            filename="test_evaluation.json",
-        )
-        if config.experiment_name:
-            logging.info("Logging evaluation metrics to Vertex AI...")
-            classification_report: dict = test_evaluation.pop(
-                "classification_report", {}
-            )
-            log_nested_metrics(classification_report)
-            # Remove the confusion matrix from the evaluation metrics
-            # as this format is not supported by Vertex AI Experiments
-            test_evaluation.pop("confusion_matrix", None)
-            aiplatform.log_metrics(test_evaluation)
-
-        write_df(
-            config,
-            predictor_refit.leaderboard(test_df, refit_full=True, display=True),
-            "test_leaderboard.csv",
-        )
-
-    if config.experiment_name:
-        if predictor_refit.problem_type == "binary":
-            logging.info("Logging ROC curve...")
-            positive_class = predictor_refit.positive_class
-            log_roc_curve(
-                label_column=config.label,
-                positive_class=positive_class,
-                test_df=test_df,
-                test_predictions=test_predictions,
-            )
-        elif predictor_refit.problem_type == "multiclass":
-            logging.info("Logging multiclass ROC curve...")
-            for class_label in predictor_refit.class_labels:
-                log_roc_curve(
-                    label_column=config.label,
-                    positive_class=class_label,
-                    test_df=test_df,
-                    test_predictions=test_predictions,
-                )
-
-        aiplatform.log_classification_metrics(
-            labels=predictor.class_labels,
-            matrix=confusion_matrix.to_numpy().tolist(),
-            display_name="Confusion Matrix - " + config.label,
-        )
-
-        log_container_execution(config)
-        write_instance_and_prediction_schemas(
+        log_metadata(
             config=config,
             predictor=predictor_refit,
+            prefix="refit_full",
         )
+    else:
+        logging.info("Exporting deployment model for inference...")
+        predictor.clone_for_deployment(
+            path=gcs_path(config.model_export_uri),
+            dirs_exist_ok=True,
+        )
+        predictor_test = predictor
 
+    # Predict on training data
+    for prefix, df in [
+        ("train", train_df),
+        ("val", val_df),
+        ("test", test_df),
+    ]:
+        logging.info(f"Predicting on {prefix} data and writing results...")
+        if df is not None:
+            evaluate_df(config, df, predictor_test, prefix)
+
+    if test_df is not None:
         # Do feature importance calculation last, as it can be time-consuming
         # and we want to ensure all other metrics are logged first.
         if config.calculate_importance:
@@ -270,7 +206,7 @@ def main():
             )
             write_df(
                 config,
-                predictor_refit.feature_importance(
+                predictor_test.feature_importance(
                     test_df,
                     time_limit=0.2 * config.time_limit  # type: ignore
                     if config.time_limit
@@ -279,8 +215,94 @@ def main():
                 "test_feature_importance.csv",
             )
 
+    write_instance_and_prediction_schemas(
+        config=config,
+        predictor=predictor_test,
+    )
+    if config.experiment_name:
         logging.info(f"{config.experiment_name} completed successfully.")
         aiplatform.end_run()
+
+
+def evaluate_df(
+    config: Config, df: pd.DataFrame, predictor: TabularPredictor, prefix: str
+) -> None:
+    """Evaluates the model on the given DataFrame and writes the results to GCS."""
+    predictions: pd.DataFrame = predictor.predict_proba(df)  # type: ignore
+    # Write the predictions to a CSV file in GCS
+    write_df(
+        config=config,
+        df=predictions,
+        filename=f"{prefix}_predictions.csv",
+    )
+
+    # Evaulate the model
+    evaluation = predictor.evaluate_predictions(
+        y_true=df[config.label],
+        y_pred=predictions,
+        display=True,
+        auxiliary_metrics=True,
+        detailed_report=True,
+    )
+
+    confusion_matrix: pd.DataFrame = evaluation.pop("confusion_matrix", None)
+
+    evaluation["confusion_matrix"] = (
+        confusion_matrix.to_dict(orient="list")
+        if confusion_matrix is not None
+        else None
+    )
+
+    # Write the evaluation to a CSV file in GCS
+    write_json(
+        config=config,
+        data=evaluation,
+        filename=f"{prefix}_evaluation.json",
+    )
+    if config.experiment_name:
+        logging.info("Logging evaluation metrics to Vertex AI...")
+        classification_report: dict = evaluation.pop(
+            "classification_report", {}
+        )
+        log_nested_metrics(classification_report, prefix=prefix)
+        # Remove the confusion matrix from the evaluation metrics
+        # as this format is not supported by Vertex AI Experiments
+        evaluation.pop("confusion_matrix", None)
+        aiplatform.log_metrics(evaluation)
+
+    write_df(
+        config,
+        predictor.leaderboard(df, refit_full=True, display=True),
+        f"{prefix}_leaderboard.csv",
+    )
+
+    if config.experiment_name:
+        if predictor.problem_type == "binary":
+            logging.info("Logging ROC curve...")
+            positive_class = predictor.positive_class
+            log_roc_curve(
+                label_column=config.label,
+                positive_class=positive_class,
+                df=df,
+                predictions=predictions,
+                prefix=prefix,
+            )
+        elif predictor.problem_type == "multiclass":
+            logging.info("Logging multiclass ROC curve...")
+            for class_label in predictor.class_labels:
+                log_roc_curve(
+                    label_column=config.label,
+                    positive_class=class_label,
+                    df=df,
+                    predictions=predictions,
+                    prefix=prefix,
+                )
+
+        aiplatform.log_classification_metrics(
+            labels=predictor.class_labels,
+            matrix=confusion_matrix.to_numpy().tolist(),
+            display_name=f"Confusion Matrix - {prefix.upper()} " + config.label,
+        )
 
 
 if __name__ == "__main__":

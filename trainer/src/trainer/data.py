@@ -1,17 +1,13 @@
 import json
 import logging
 import os
-import time
 from fnmatch import fnmatch
 from typing import Any, Literal
 
 import pandas as pd
 import yaml
 from autogluon.tabular import TabularPredictor
-from autogluon.tabular.version import __version__ as autogluon_version
-from google.cloud import aiplatform, bigquery, storage
-from numpy import inf, linspace
-from sklearn.metrics import roc_curve
+from google.cloud import bigquery, storage
 
 from trainer.config import Config
 
@@ -227,166 +223,6 @@ def write_json(
     except Exception as e:
         logging.error(f"Error writing JSON to {uri}: {e}", exc_info=e)
         return
-
-
-def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:
-    """Recursively logs metrics to an aiplatform experiment."""
-    for key, value in metrics.items():
-        if isinstance(value, dict):
-            if prefix:
-                log_nested_metrics(value, prefix=f"{prefix} {key}")
-            else:
-                log_nested_metrics(value, prefix=key)
-        else:
-            if prefix:
-                key = f"{prefix} {key}"
-            aiplatform.log_metrics({key: value})
-
-
-def log_learning_curves(model_data: dict[str, list]) -> None:
-    """Logs learning curves returned by the predictor to an aiplatform experiment.
-
-    Args:
-        model_data (dict[str, list]): The model data containing the learning curves per model.
-    """
-    # Create a flattened dictionary of results
-    # The keys will be in the format "model_name metric split"
-    # The values will be the learning curves for that metric and split
-    # e.g. "model_name accuracy train" -> [0.1, 0.2, 0.3, ...]
-    results: dict[str, list] = {}
-    try:
-        for model_name, data in model_data.items():
-            learning_curves = data[2]
-            splits = data[0]
-            metrics = data[1]
-
-            # learning curves are per metric, per split
-            for n, metric in enumerate(metrics):
-                for split, curve in zip(splits, learning_curves[n]):
-                    results[f"{model_name} {metric} {split}"] = curve
-
-        # Get the maximum length of the curves
-        max_length = max((len(curve) for curve in results.values()), default=0)
-
-        for n in range(max_length):
-            aiplatform.log_time_series_metrics(
-                {
-                    key: curve[n]
-                    for key, curve in results.items()
-                    if len(curve) > n
-                },
-                step=n,
-            )
-            time.sleep(0.1)  # Sleep to avoid rate limiting
-    except Exception as e:
-        logging.error(f"Error logging learning curves: {e}")
-        return
-
-
-def log_metadata(
-    config: Config, predictor: TabularPredictor, prefix: str = ""
-) -> None:
-    """Logs metadata about the run to GCS."""
-    logging.info("Writing metadata and learning curves to GCS...")
-    summary = predictor.fit_summary(show_plot=False)
-    del summary["leaderboard"]
-    write_json(config, summary, f"{prefix}_fit_summary.json")
-
-    metadata, model_data = predictor.learning_curves()
-    write_json(config, data=metadata, filename=f"{prefix}_metadata.json")
-    write_json(config, data=model_data, filename=f"{prefix}_model_data.json")
-
-    if config.experiment_name:
-        if model_data:
-            logging.info(f"Logging {prefix} learning curves to Vertex AI...")
-            log_learning_curves(model_data)
-        else:
-            logging.info(f"No {prefix} learning curves to log.")
-
-
-def log_roc_curve(
-    label_column: str,
-    positive_class: str | int,
-    test_df: pd.DataFrame,
-    test_predictions: pd.DataFrame,
-) -> None:
-    """Logs the ROC curve for a binary classification problem to an aiplatform experiment.
-
-    Args:
-        label_column (str): The name of the column containing the true labels.
-        positive_class (str): The class label for the positive class.
-        test_df (pd.DataFrame): The DataFrame containing the test data.
-        test_predictions (pd.DataFrame): The DataFrame containing the test predictions.
-    """
-    try:
-        y_true_numerical = test_df[label_column].apply(
-            lambda x: 1 if x == positive_class else 0
-        )
-        fpr, tpr, threshold = roc_curve(
-            y_true_numerical, test_predictions[positive_class]
-        )
-        fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-        tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-        threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
-
-        # Subsample the data to 1000 points for plotting
-        if len(fpr) > 1000:
-            indices = linspace(0, len(fpr) - 1, 1000, dtype=int)
-            fpr = fpr[indices]
-            tpr = tpr[indices]
-            threshold = threshold[indices]
-
-        aiplatform.log_classification_metrics(
-            fpr=fpr.tolist(),
-            tpr=tpr.tolist(),
-            threshold=threshold.tolist(),
-            display_name=f"ROC Curve - {positive_class}",
-        )
-    except Exception as e:
-        logging.error(f"Error logging ROC curve: {e}", exc_info=e)
-        return
-
-
-def log_container_execution(config: Config) -> None:
-    """Logs the execution of a container to an aiplatform experiment.
-
-    Args:
-        config (Config): The configuration object containing the model export URI and label.
-    """
-    # TODO: Differentiate between Vertex Dataset and Custom Dataset
-    #       and use the correct schema for the input artifacts.
-    #       Currently, we use the system.Dataset schema for both.
-    input_artifacts = [
-        aiplatform.Artifact.create(
-            schema_title="system.Dataset",
-            uri=split[1],
-            metadata=dict(
-                payload_format=config.data_format.upper(),
-            ),
-            display_name=f"{split[0]} data for {config.label}",
-        )
-        for split in zip(
-            ["Train", "Validation", "Test"],
-            [config.train_data_uri, config.val_data_uri, config.test_data_uri],
-        )
-        if split[1] is not None
-    ]
-    model_artifact = aiplatform.Artifact.create(
-        schema_title="system.Model",
-        uri=config.model_export_uri,
-        display_name=f"AutoGluon model for {config.label}",
-        metadata=dict(
-            framework_version=autogluon_version,
-            framework="AutoGluon",
-        ),
-    )
-    with aiplatform.start_execution(
-        schema_title="system.ContainerExecution",
-        display_name="AutoGluon Training",
-    ) as execution:
-        # Log the execution
-        execution.assign_input_artifacts(input_artifacts)
-        execution.assign_output_artifacts([model_artifact])
 
 
 def convert_feature_map_to_schema(

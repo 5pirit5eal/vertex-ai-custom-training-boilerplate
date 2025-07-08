@@ -34,6 +34,7 @@ class Config(msgspec.Struct):
     calculate_importance: bool = False
     hyperparameters: dict[str, Any] | None = None
     multimodal: bool = False
+    refit_full: bool = False
     weight_column: str = "weight"
 
     # Vertex AI experiment variables
@@ -225,6 +226,12 @@ class Config(msgspec.Struct):
 @click.option(
     "--multimodal",
     help="Use multimodal training",
+    is_flag=True,
+    default=False,
+)
+@click.option(
+    "--refit-full",
+    help="Refit the model on the full training data after initial training, collapsing the ensemble. This will speed up inference but may reduce accuracy.",
     is_flag=True,
     default=False,
 )
