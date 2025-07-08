@@ -78,7 +78,7 @@ class Config(msgspec.Struct):
         if self.checkpoint_uri is None:
             # If no tensorboard log URI is provided, use the model export URI
             self.tensorboard_log_uri = os.path.join(
-                self.model_export_uri, "ckpt"
+                self.model_export_uri, "checkpoints"
             )
 
         # Create the necessary folders
