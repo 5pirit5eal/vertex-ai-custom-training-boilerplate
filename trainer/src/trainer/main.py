@@ -17,7 +17,7 @@ from trainer.data import (
     write_instance_and_prediction_schemas,
     write_json,
 )
-from trainer.logging import (
+from trainer.log_experiment import (
     log_metadata,
     log_nested_metrics,
     log_roc_curve,
