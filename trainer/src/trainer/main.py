@@ -141,7 +141,7 @@ def main():
         tuning_data=val_df,
         presets=config.presets,
         time_limit=config.time_limit,
-        num_gpus=1 if config.use_gpu and torch.cuda.is_available() else 0,
+        num_gpus="auto" if config.use_gpu and torch.cuda.is_available() else 0,
         hyperparameters=config.hyperparameters,
         # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
         ag_args_ensemble={
@@ -167,24 +167,14 @@ def main():
 
         predictor_refit.refit_full(fit_strategy="auto")
 
-        logging.info("Exporting refit deployment model for inference...")
-        predictor_refit.clone_for_deployment(
-            path=gcs_path(config.model_export_uri),
-            dirs_exist_ok=True,
-        )
-        predictor_test = predictor_refit
-
         log_metadata(
             config=config,
             predictor=predictor_refit,
             prefix="refit_full",
         )
+
+        predictor_test = predictor_refit
     else:
-        logging.info("Exporting deployment model for inference...")
-        predictor.clone_for_deployment(
-            path=gcs_path(config.model_export_uri),
-            dirs_exist_ok=True,
-        )
         predictor_test = predictor
 
     # Predict on training data
@@ -196,6 +186,15 @@ def main():
         logging.info(f"Predicting on {prefix} data and writing results...")
         if df is not None:
             evaluate_df(config, df, predictor_test, prefix)
+
+    if config.experiment_name:
+        write_df(
+            config,
+            predictor_test.leaderboard(
+                test_df, refit_full=config.refit_full, display=True
+            ),
+            "test_leaderboard.csv",
+        )
 
     if test_df is not None:
         # Do feature importance calculation last, as it can be time-consuming
@@ -219,6 +218,11 @@ def main():
         config=config,
         predictor=predictor_test,
     )
+    logging.info("Exporting deployment model for inference...")
+    predictor_test.clone_for_deployment(
+        path=gcs_path(config.model_export_uri),
+        dirs_exist_ok=True,
+    )
     if config.experiment_name:
         logging.info(f"{config.experiment_name} completed successfully.")
         aiplatform.end_run()
@@ -229,7 +233,7 @@ def evaluate_df(
     df: pd.DataFrame,
     predictor: TabularPredictor,
     prefix: str,
-    save_predictions: bool = True,
+    save_predictions: bool = False,  # To be changed once the predictions are useful
 ) -> None:
     """Evaluates the model on the given DataFrame and writes the results to GCS."""
     predictions: pd.DataFrame = predictor.predict_proba(df)  # type: ignore
@@ -277,12 +281,6 @@ def evaluate_df(
         evaluation.pop("confusion_matrix", None)
         aiplatform.log_metrics(evaluation)
 
-    write_df(
-        config,
-        predictor.leaderboard(df, refit_full=True, display=True),
-        f"{prefix}_leaderboard.csv",
-    )
-
     if config.experiment_name:
         if predictor.problem_type == "binary":
             logging.info(f"Logging {prefix} ROC curve...")
@@ -295,15 +293,10 @@ def evaluate_df(
                 prefix=prefix,
             )
         elif predictor.problem_type == "multiclass":
-            logging.info(f"Logging {prefix} multiclass ovr ROC curves...")
-            for class_label in predictor.class_labels:
-                log_roc_curve(
-                    label_column=config.label,
-                    positive_class=class_label,
-                    df=df,
-                    predictions=predictions,
-                    prefix=prefix,
-                )
+            logging.info(
+                f"Logging {prefix} multiclass ovr ROC curves not implemented yet."
+            )
+            # TODO: Implement multiclass ROC curve
 
         aiplatform.log_classification_metrics(
             labels=predictor.class_labels,
