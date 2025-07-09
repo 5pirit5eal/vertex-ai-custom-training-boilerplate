@@ -106,9 +106,9 @@ def main():
     logging.info("Loading data...")
     train_df, val_df, test_df = load_data(config)
 
-    if config.weight_column not in train_df.columns:
+    if config.sample_weight not in train_df.columns:
         logging.info(
-            f"Weight column '{config.weight_column}' not found in training data. No weighting will be applied."
+            f"Weight column '{config.sample_weight}' not found in training data. No weighting will be applied."
         )
 
     # Create a TabularPredictor.
@@ -127,8 +127,11 @@ def main():
         predictor = TabularPredictor(
             label=config.label,
             eval_metric=config.eval_metric,
-            sample_weight=config.weight_column
-            if config.weight_column in train_df.columns
+            sample_weight=config.sample_weight
+            if (
+                config.sample_weight in train_df.columns
+                or config.sample_weight in ["auto_weight", "balanced_weight"]
+            )  # type: ignore
             else None,  # type: ignore
             path=gcs_path(config.checkpoint_uri, "fit"),
             log_to_file=False,
@@ -183,9 +186,11 @@ def main():
         ("val", val_df),
         ("test", test_df),
     ]:
-        logging.info(f"Predicting on {prefix} data and writing results...")
         if df is not None:
+            logging.info(f"Predicting on {prefix} data and writing results...")
             evaluate_df(config, df, predictor_test, prefix)
+        else:
+            logging.info(f"No {prefix} data available for evaluation.")
 
     if config.experiment_name:
         write_df(

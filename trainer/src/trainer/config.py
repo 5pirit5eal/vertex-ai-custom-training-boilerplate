@@ -35,7 +35,7 @@ class Config(msgspec.Struct):
     hyperparameters: dict[str, Any] | None = None
     multimodal: bool = False
     refit_full: bool = False
-    weight_column: str = "weight"
+    sample_weight: str = "weight"
 
     # Vertex AI experiment variables
     experiment_name: str | None = None
@@ -242,8 +242,9 @@ class Config(msgspec.Struct):
     default=False,
 )
 @click.option(
-    "--weight-column",
-    help="Weight column name for the training data",
+    "--sample-weight",
+    help="Weight configuration for the training data. Either a column name, 'auto_weight' "
+    "for automatic weighting or 'balanced_weight' for balanced weighting.",
     default="weight",
 )
 @click.option(
