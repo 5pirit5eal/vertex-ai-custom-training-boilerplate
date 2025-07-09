@@ -1,4 +1,6 @@
+import json
 import os
+
 from typing import Any, Literal
 
 import click
@@ -108,6 +110,35 @@ class Config(msgspec.Struct):
             raise ValueError(
                 f"Only one quality preset can be used. Found: {self.presets}"
             )
+
+        if isinstance(self.hyperparameters, str):
+            self._parse_hyperparameters(self.hyperparameters)
+
+    def _parse_hyperparameters(self, hyperparams_str: str) -> None:
+        # If hyperparameters is a string, it could be:
+        # 1. A JSON string with hyperparameters
+        # 2. A preset name from AutoGluon's hyperparameter configs
+        # 3. A comma-separated list of preset names
+
+        hyperparams_str = self.hyperparameters
+
+        # First try to parse as JSON
+        try:
+            self.hyperparameters = json.loads(hyperparams_str)
+        except (json.JSONDecodeError, msgspec.DecodeError):
+            # If JSON parsing fails, try to treat as preset name(s)
+            preset_names = [name.strip() for name in hyperparams_str.split(",")]
+            hyperparams = {}
+
+            for preset_name in preset_names:
+                # Handle empty strings after splitting
+                if not preset_name:
+                    continue
+
+                preset_config = get_hyperparameter_config(preset_name)
+                hyperparams.update(preset_config)
+
+            self.hyperparameters = hyperparams if hyperparams else None
 
         # Set the hyperparameters if multimodal is True
         if self.multimodal:
@@ -231,7 +262,8 @@ class Config(msgspec.Struct):
 )
 @click.option(
     "--refit-full",
-    help="Refit the model on the full training data after initial training, collapsing the ensemble. This will speed up inference but may reduce accuracy.",
+    help="Refit the model on the full training data after initial training, collapsing the ensemble. "
+    "This will speed up inference but may reduce performance.",
     is_flag=True,
     default=False,
 )
@@ -240,6 +272,14 @@ class Config(msgspec.Struct):
     help="Calculate feature importance",
     is_flag=True,
     default=False,
+)
+@click.option(
+    "--hyperparameters",
+    help="Hyperparameters for the training job. Can be: (1) JSON string with hyperparameters, "
+    "(2) AutoGluon preset name (toy, very_fast, fast, medium, slow, very_slow, multimodal, interpretable, experimental), or "
+    "(3) comma-separated list of preset names. If not provided, defaults to the preset hyperparameters.",
+    default=None,
+    type=str,
 )
 @click.option(
     "--sample-weight",

@@ -141,11 +141,11 @@ def main():
     logging.info("Fitting model...")
     predictor.fit(
         train_data=train_df,
-        tuning_data=val_df,
+        tuning_data=val_df,  # type: ignore
         presets=config.presets,
-        time_limit=config.time_limit,
+        time_limit=config.time_limit,  # type: ignore
         num_gpus="auto" if config.use_gpu and torch.cuda.is_available() else 0,
-        hyperparameters=config.hyperparameters,
+        hyperparameters=config.hyperparameters,  # type: ignore
         # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
         ag_args_ensemble={
             "fold_fitting_strategy": "sequential_local",
