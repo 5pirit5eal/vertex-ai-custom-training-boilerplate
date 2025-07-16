@@ -267,15 +267,12 @@ def convert_class_labels_to_schema(
         dict[str, Any]: The schema for the class labels.
     """
     return {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                str(label): {"type": "number"} for label in class_labels
-            },
-            "required": [str(label) for label in class_labels],
-            "additionalProperties": False,
+        "type": "object",
+        "properties": {
+            str(label): {"type": "number"} for label in class_labels
         },
+        "required": [str(label) for label in class_labels],
+        "additionalProperties": False,
     }
 
 
