@@ -16,6 +16,8 @@ from trainer.data import (
     write_df,
     write_instance_and_prediction_schemas,
     write_json,
+    write_evaluation_results,
+    create_vertex_ai_eval,
 )
 from trainer.log_experiment import (
     log_metadata,
@@ -275,6 +277,7 @@ def evaluate_df(
         data=evaluation,
         filename=f"{prefix}_evaluation.json",
     )
+
     if config.experiment_name:
         logging.info("Logging evaluation metrics to Vertex AI...")
         classification_report: dict = evaluation.pop(
@@ -307,6 +310,20 @@ def evaluate_df(
             labels=predictor.class_labels,
             matrix=confusion_matrix.to_numpy().tolist(),
             display_name=f"Confusion Matrix - {prefix.upper()} " + config.label,
+        )
+    if predictor.problem_type == "binary":
+        logging.info("Creating Vertex AI evaluation...")
+        positive_class = predictor.positive_class
+        vertex_eval = create_vertex_ai_eval(
+            label_column=config.label,
+            positive_class=positive_class,
+            df=df,
+            predictions=predictions,
+        )
+        write_json(
+            config=config,
+            data=vertex_eval,
+            filename="vertex_ai_evaluation.json",
         )
 
 

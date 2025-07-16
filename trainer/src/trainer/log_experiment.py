@@ -5,11 +5,13 @@ from typing import Any
 import pandas as pd
 from autogluon.tabular import TabularPredictor
 from google.cloud import aiplatform
-from numpy import inf, linspace
-from sklearn.metrics import roc_curve
+
 
 from trainer.config import Config
-from trainer.data import write_json
+from trainer.data import (
+    write_json,
+    calculate_roc_curve,
+)
 
 
 def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:
@@ -103,22 +105,9 @@ def log_roc_curve(
         predictions (pd.DataFrame): The DataFrame containing the test predictions.
     """
     try:
-        y_true_numerical = df[label_column].apply(
-            lambda x: 1 if x == positive_class else 0
+        fpr, tpr, threshold = calculate_roc_curve(
+            label_column, positive_class, df, predictions
         )
-        fpr, tpr, threshold = roc_curve(
-            y_true_numerical, predictions[positive_class]
-        )
-        fpr[fpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-        tpr[tpr == inf] = 1.0  # Replace inf with 1.0 for plotting
-        threshold[threshold == inf] = 1.0  # Replace inf with 1.0 for plotting
-
-        # Subsample the data to 1000 points for plotting
-        if len(fpr) > 1000:
-            indices = linspace(0, len(fpr) - 1, 1000, dtype=int)
-            fpr = fpr[indices]
-            tpr = tpr[indices]
-            threshold = threshold[indices]
 
         aiplatform.log_classification_metrics(
             fpr=fpr.tolist(),
