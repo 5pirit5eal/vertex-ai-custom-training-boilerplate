@@ -14,10 +14,12 @@ from trainer.data import (
     gcs_path,
     load_data,
     write_df,
-    write_instance_and_prediction_schemas,
     write_json,
-    write_evaluation_results,
+)
+from trainer.vertex import (
+    write_instance_and_prediction_schemas,
     create_vertex_ai_eval,
+    create_multiclass_vertex_ai_eval,
 )
 from trainer.log_experiment import (
     log_metadata,
@@ -128,7 +130,7 @@ def main():
     else:
         predictor = TabularPredictor(
             label=config.label,
-            eval_metric=config.eval_metric,
+            eval_metric=config.eval_metric,  # type: ignore
             sample_weight=config.sample_weight
             if (
                 config.sample_weight in train_df.columns
@@ -143,11 +145,11 @@ def main():
     logging.info("Fitting model...")
     predictor.fit(
         train_data=train_df,
-        tuning_data=val_df,
+        tuning_data=val_df,  # type: ignore
         presets=config.presets,
-        time_limit=config.time_limit,
+        time_limit=config.time_limit,  # type: ignore
         num_gpus="auto" if config.use_gpu and torch.cuda.is_available() else 0,
-        hyperparameters=config.hyperparameters,
+        hyperparameters=config.hyperparameters,  # type: ignore
         # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
         ag_args_ensemble={
             "fold_fitting_strategy": "sequential_local",
@@ -164,7 +166,7 @@ def main():
     if config.refit_full:
         # Refit the model on the train and validation data
         logging.info("Refitting model on full training data...")
-        predictor_refit: TabularPredictor = predictor.clone(
+        predictor_refit: TabularPredictor = predictor.clone(  # type: ignore
             path=gcs_path(config.checkpoint_uri, "refit_full"),
             return_clone=True,
             dirs_exist_ok=True,
@@ -317,6 +319,18 @@ def evaluate_df(
         vertex_eval = create_vertex_ai_eval(
             label_column=config.label,
             positive_class=positive_class,
+            df=df,
+            predictions=predictions,
+        )
+        write_json(
+            config=config,
+            data=vertex_eval,
+            filename="vertex_ai_evaluation.json",
+        )
+    if predictor.problem_type == "multiclass":
+        logging.info("Creating Vertex AI evaluation for multiclass...")
+        vertex_eval = create_multiclass_vertex_ai_eval(
+            label_column=config.label,
             df=df,
             predictions=predictions,
         )

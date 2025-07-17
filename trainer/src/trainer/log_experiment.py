@@ -1,3 +1,5 @@
+"""This module provides functions to log experiment results to Google Cloud Vertex AI Experiments."""
+
 import logging
 import time
 from typing import Any
@@ -8,10 +10,8 @@ from google.cloud import aiplatform
 
 
 from trainer.config import Config
-from trainer.data import (
-    write_json,
-    calculate_roc_curve,
-)
+from trainer.data import write_json
+from trainer.vertex import calculate_roc_curve
 
 
 def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:

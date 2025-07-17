@@ -3,7 +3,7 @@ r"""AutoGluon serving binary.
 This module sets up a Litestar web server for serving predictions from a
 trained AutoGluon model. The server exposes two endpoints:
 
-1.  `/ping`: A health check endpoint that returns "pong" to
+1.  `/health`: A health check endpoint that returns "Model is ready" to
     indicate that the server is running.
 2.  `/predict`: An endpoint that accepts POST requests with JSON content.
     Each request should contain one or more instances for which the
@@ -33,7 +33,10 @@ from litestar.status_codes import (
 )
 from torch.cuda import is_available
 
-from predictor.utils import download_gcs_dir_to_local
+from predictor.utils import (
+    download_gcs_dir_to_local,
+    parse_instances_to_dataframe,
+)
 
 # Constants
 _PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
@@ -82,7 +85,7 @@ def load_model(state: State) -> None:
     logging.info("Model loaded and ready to serve predictions.")
 
 
-@get(os.getenv("AIP_HEALTH_ROUTE", "/ping"))
+@get(os.getenv("AIP_HEALTH_ROUTE", "/health"))
 async def ping(state: State) -> Response:
     if not state.is_model_ready:
         return Response(
@@ -103,8 +106,8 @@ async def predict(request: Request, state: State) -> Response:
     try:
         data = await request.json()
         instances = data.get("instances", [])
-        df_to_predict = pd.DataFrame(instances)
         model: TabularPredictor = state.predictor
+        df_to_predict = parse_instances_to_dataframe(instances, model)
 
         if model.problem_type not in ["binary", "multiclass"]:
             return Response(
@@ -113,9 +116,14 @@ async def predict(request: Request, state: State) -> Response:
                 media_type="application/json",
             )
         else:
-            predictions: pd.DataFrame = model.predict_proba(df_to_predict)
+            predictions = model.predict_proba(df_to_predict)
 
-        response = {"predictions": predictions.to_dict(orient="records")}
+        if isinstance(predictions, pd.DataFrame):
+            response_data = predictions.to_dict(orient="records")
+        else:
+            response_data = predictions.tolist()
+
+        response = {"predictions": response_data}
         return Response(
             content=json.dumps(response),
             status_code=HTTP_200_OK,

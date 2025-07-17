@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from unittest.mock import Mock
 
-from trainer.data import create_vertex_ai_eval
+from trainer.vertex import create_vertex_ai_eval
 
 
 class TestCreateVertexAIEval:
