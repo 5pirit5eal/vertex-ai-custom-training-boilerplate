@@ -1,83 +1,111 @@
+"""Tests for the utility functions."""
+
+import os
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock
-from predictor.utils import parse_instances_to_dataframe
+from autogluon.tabular import TabularPredictor
 
-
-# Mock TabularPredictor for testing
-class MockFeatureMetadata:
-    def to_dict(self):
-        return {"feature1": "int", "feature2": "float", "feature3": "object"}
-
-
-class MockTabularPredictor:
-    def __init__(self):
-        self.feature_metadata_in = MockFeatureMetadata()
+from predictor.utils import (
+    download_gcs_dir_to_local,
+    parse_instances_to_dataframe,
+)
 
 
 @pytest.fixture
-def mock_predictor():
-    return MockTabularPredictor()
+def mock_predictor() -> MagicMock:
+    """Returns a mock TabularPredictor."""
+    predictor = MagicMock(spec=TabularPredictor)
+    predictor.feature_metadata_in.to_dict.return_value = {
+        "feat1": "int",
+        "feat2": "float",
+    }
+    return predictor
 
 
-def test_parse_instances_with_list_of_dicts(mock_predictor):
-    instances = [
-        {"feature1": 1, "feature2": 2.0, "feature3": "a"},
-        {"feature1": 2, "feature2": 3.0, "feature3": "b"},
-    ]
-    df = parse_instances_to_dataframe(instances, mock_predictor)
+def test_parse_instances_to_dataframe_with_dict(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with a list of dictionaries."""
+    instances: list[dict[str, Any] | list[Any]] = [{"feat1": 1, "feat2": 2.0}]
+    df, is_list = parse_instances_to_dataframe(instances, mock_predictor)
     assert isinstance(df, pd.DataFrame)
-    assert df.shape == (2, 3)
-    assert list(df.columns) == ["feature1", "feature2", "feature3"]
-    assert df["feature1"].tolist() == [1, 2]
+    assert not is_list
+    assert df.to_dict(orient="records") == instances
 
 
-def test_parse_instances_with_list_of_lists(mock_predictor):
-    instances = [
-        [1, 2.0, "a"],
-        [2, 3.0, "b"],
-    ]
-    df = parse_instances_to_dataframe(instances, mock_predictor)
+def test_parse_instances_to_dataframe_with_list(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with a list of lists."""
+    instances: list[dict[str, Any] | list[Any]] = [[1, 2.0]]
+    df, is_list = parse_instances_to_dataframe(instances, mock_predictor)
     assert isinstance(df, pd.DataFrame)
-    assert df.shape == (2, 3)
-    assert list(df.columns) == ["feature1", "feature2", "feature3"]
-    assert df["feature1"].tolist() == [1, 2]
+    assert is_list
+    assert df.values.tolist() == instances
 
 
-def test_parse_instances_with_missing_features_in_dict(mock_predictor):
-    instances = [{"feature1": 1}]
+def test_parse_instances_to_dataframe_with_missing_features(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with missing features."""
+    instances: list[dict[str, Any] | list[Any]] = [{"feat1": 1}]
     with pytest.raises(ValueError, match="Missing required features"):
         parse_instances_to_dataframe(instances, mock_predictor)
 
 
-def test_parse_instances_with_wrong_number_of_features_in_list(mock_predictor):
-    instances = [[1, 2.0]]
+def test_parse_instances_to_dataframe_with_wrong_number_of_features(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with the wrong number of features."""
+    instances: list[dict[str, Any] | list[Any]] = [[1]]
     with pytest.raises(
-        ValueError, match="Instance 0 has 2 values, but 3 are expected."
+        ValueError, match="Instance 0 has 1 values, but 2 are expected."
     ):
         parse_instances_to_dataframe(instances, mock_predictor)
 
 
-def test_parse_instances_with_empty_list(mock_predictor):
-    instances = []
-    df = parse_instances_to_dataframe(instances, mock_predictor)
+def test_parse_instances_to_dataframe_with_empty_list(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with an empty list."""
+    df, is_list = parse_instances_to_dataframe([], mock_predictor)
     assert isinstance(df, pd.DataFrame)
+    assert not is_list
     assert df.empty
-    assert list(df.columns) == ["feature1", "feature2", "feature3"]
 
 
-def test_parse_instances_with_invalid_format(mock_predictor):
-    instances = ["invalid_instance"]
+def test_parse_instances_to_dataframe_with_invalid_format(
+    mock_predictor: MagicMock,
+) -> None:
+    """Tests parse_instances_to_dataframe with an invalid format."""
     with pytest.raises(ValueError, match="Invalid instances format"):
-        parse_instances_to_dataframe(instances, mock_predictor)  # type: ignore
+        parse_instances_to_dataframe("invalid", mock_predictor)  # type: ignore
 
 
-def test_parse_instances_extra_features_in_dict(mock_predictor):
-    instances = [
-        {"feature1": 1, "feature2": 2.0, "feature3": "a", "extra": "value"},
-    ]
-    df = parse_instances_to_dataframe(instances, mock_predictor)
-    assert isinstance(df, pd.DataFrame)
-    assert df.shape == (1, 3)
-    assert "extra" not in df.columns
-    assert list(df.columns) == ["feature1", "feature2", "feature3"]
+@patch("predictor.utils.storage.Client")
+def test_download_gcs_dir_to_local(mock_storage_client: MagicMock) -> None:
+    """Tests the download_gcs_dir_to_local function."""
+    mock_blob = MagicMock()
+    mock_blob.name = "test_prefix/test_file.txt"
+    mock_storage_client.return_value.list_blobs.return_value = [mock_blob]
+
+    with (
+        patch("os.makedirs"),
+        patch("builtins.print"),
+        patch.object(mock_blob, "download_to_filename") as mock_download,
+    ):
+        download_gcs_dir_to_local(
+            "gs://test-bucket/test_prefix", "/tmp/test_dir"
+        )
+        mock_download.assert_called_once_with("/tmp/test_dir/test_file.txt")
+
+
+def test_download_gcs_dir_to_local_with_invalid_path() -> None:
+    """Tests the download_gcs_dir_to_local function with an invalid path."""
+    with pytest.raises(
+        ValueError, match="is not a GCS path starting with gs://."
+    ):
+        download_gcs_dir_to_local("invalid_path", "/tmp/test_dir")

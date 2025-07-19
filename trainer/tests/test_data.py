@@ -148,8 +148,13 @@ class TestCreateVertexAIEval:
         # Check rows (2x2 matrix for binary classification)
         rows = cm["rows"]
         assert len(rows) == 2
-        assert all(len(row) == 2 for row in rows)
-        assert all(isinstance(cell, int) for row in rows for cell in row)
+        assert all(len(subrow) == 2 for row in rows for subrow in row.values())
+        assert all(
+            isinstance(cell, int)
+            for row in rows
+            for subrow in row.values()
+            for cell in subrow
+        )
 
     def test_confusion_matrix_in_confidence_metrics(self):
         """Test that confusion matrix appears in confidence metrics for 0.5 threshold."""

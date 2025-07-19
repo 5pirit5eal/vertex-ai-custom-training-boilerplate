@@ -70,7 +70,6 @@ def _convert_class_labels_to_pred_schema(
             str(label): {"type": "number"} for label in class_labels
         },
         "required": [str(label) for label in class_labels],
-        "additionalProperties": False,
     }
 
 
@@ -93,10 +92,21 @@ def write_instance_and_prediction_schemas(
         )
         label_schema = _convert_class_labels_to_pred_schema(classes)
 
+        parameters_schema = {
+            "type": "object",
+            "properties": {
+                "as_object": {
+                    "type": "boolean",
+                    "description": "If true, the prediction response will be a JSON object. If false, it will be a JSON array. If not provided, the format will be inferred from the input.",
+                }
+            },
+        }
+
         # Write the schema to a YAML file
         for schema, filename in [
             (feature_schema, "instance_schema.yaml"),
             (label_schema, "prediction_schema.yaml"),
+            (parameters_schema, "parameters_schema.yaml"),
         ]:
             schema_path = gcs_path(config.model_export_uri, filename)
             os.makedirs(os.path.dirname(schema_path), exist_ok=True)
@@ -186,6 +196,7 @@ def calculate_confusion_matrix(
     positive_class: str | int,
     df: pd.DataFrame,
     predictions: pd.DataFrame,
+    labels: list[str | int] | None = None,
 ) -> dict[str, Any]:
     """Calculates the confusion matrix for a binary classification problem.
 
@@ -204,15 +215,18 @@ def calculate_confusion_matrix(
         lambda x: 1 if x >= 0.5 else 0
     )
 
-    cm = confusion_matrix(y_true_numerical, y_pred_numerical)
+    cm = confusion_matrix(y_true_numerical, y_pred_numerical, labels=labels)
 
     # Convert numpy types to native Python types for JSON serialization
-    rows = [[int(c) for c in row] for row in cm]
+    rows = [{"row": [int(c) for c in row]} for row in cm]
 
-    annotation_specs = [
-        {"displayName": f"not {positive_class}"},
-        {"displayName": str(positive_class)},
-    ]
+    if labels is None:
+        annotation_specs = [
+            {"displayName": f"not {positive_class}"},
+            {"displayName": str(positive_class)},
+        ]
+    else:
+        annotation_specs = [{"displayName": str(label)} for label in labels]
 
     return {
         "annotationSpecs": annotation_specs,
@@ -299,6 +313,7 @@ def create_vertex_ai_eval(
     positive_class: str | int,
     df: pd.DataFrame,
     predictions: pd.DataFrame,
+    labels: list[str | int] | None = None,
 ) -> dict[str, Any]:
     """Create evaluation metrics in Vertex AI format.
 
@@ -311,6 +326,7 @@ def create_vertex_ai_eval(
         positive_class: Label value representing the positive class.
         df: DataFrame containing test data with true labels.
         predictions: DataFrame containing prediction probabilities for each class.
+        labels: Optional list of class labels for confusion matrix annotation.
 
     Returns:
         Dictionary containing evaluation results with:
@@ -332,7 +348,7 @@ def create_vertex_ai_eval(
 
     # Calculate confusion matrix at standard 0.5 threshold for top-level metric
     confusion_matrix_result = calculate_confusion_matrix(
-        label_column, positive_class, df, predictions
+        label_column, positive_class, df, predictions, labels=labels
     )
 
     # Generate confidence metrics for each threshold
@@ -380,6 +396,7 @@ def create_multiclass_vertex_ai_eval(
     label_column: str,
     df: pd.DataFrame,
     predictions: pd.DataFrame,
+    labels: list[str | int],
 ) -> dict[str, Any]:
     """Create evaluation metrics for multiclass classification in Vertex AI format.
 
@@ -395,12 +412,12 @@ def create_multiclass_vertex_ai_eval(
     y_true = df[label_column]
     y_pred = predictions.idxmax(axis=1)
 
-    cm = confusion_matrix(y_true, y_pred)
-    annotation_specs = [
-        {"displayName": str(label)} for label in y_true.unique()
-    ]
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    annotation_specs = [{"displayName": str(label)} for label in labels]
 
     return {
-        "annotationSpecs": annotation_specs,
-        "rows": cm.tolist(),
+        "confusionMatrix": {
+            "annotationSpecs": annotation_specs,
+            "rows": [{"row": [int(c) for c in row]} for row in cm],
+        }
     }

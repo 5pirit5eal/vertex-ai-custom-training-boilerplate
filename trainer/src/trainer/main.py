@@ -333,6 +333,7 @@ def evaluate_df(
             label_column=config.label,
             df=df,
             predictions=predictions,
+            labels=predictor.class_labels,
         )
         write_json(
             config=config,
