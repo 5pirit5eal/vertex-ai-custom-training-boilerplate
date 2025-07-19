@@ -63,7 +63,6 @@ async def predict(
     try:
         predictions = create_prediction(model, data.instances, data.parameters)
     except Exception as e:
-        logging.error(f"Prediction failed: {e}")
         raise HTTPException(
             detail=str(e),
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
