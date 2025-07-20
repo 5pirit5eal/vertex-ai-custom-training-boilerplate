@@ -99,7 +99,9 @@ vertex-ai-custom-training-boilerplate/
 │   └── src/trainer/
 │       ├── main.py                # Training entry point
 │       ├── config.py              # Configuration management
-│       └── data.py                # Data loading, logging & processing
+│       ├── data.py                # Data loading and processing
+│       ├── experiment.py          # Vertex AI Experiment tracking
+│       └── vertex.py              # Vertex AI schema and metric utilities
 └── predictor/                     # Prediction component
     ├── Dockerfile                 # Multi-stage Docker build
     ├── pyproject.toml            # Dependencies & configuration
@@ -113,9 +115,11 @@ vertex-ai-custom-training-boilerplate/
 
 | File | Purpose | Important Features |
 |------|---------|-------------------|
-| `trainer/src/trainer/main.py` | Training orchestration | AutoGluon fitting, experiment tracking, model export |
-| `trainer/src/trainer/config.py` | Configuration management | 30+ parameters, validation, CLI interface |
-| `trainer/src/trainer/data.py` | Data processing | BigQuery/CSV loading, feature preprocessing |
+| `trainer/src/trainer/main.py` | Training orchestration | AutoGluon fitting, evaluation, experiment tracking, model export |
+| `trainer/src/trainer/config.py` | Configuration management | 20+ parameters, validation, `click` CLI interface, `msgspec` validation |
+| `trainer/src/trainer/data.py` | Data processing | BigQuery/CSV loading with wildcard support, GCS FUSE path conversion |
+| `trainer/src/trainer/experiment.py` | Experiment Tracking | Manages Vertex AI Experiments, logs learning curves and ROC curves |
+| `trainer/src/trainer/vertex.py` | Vertex AI Utilities | Creates OpenAPI schemas, calculates evaluation metrics for Vertex AI |
 | `predictor/src/predictor/main.py` | Prediction API | Litestar server, health checks, batch inference |
 | `build_and_push.sh` | Deployment automation | Docker build, Artifact Registry push |
 
@@ -202,7 +206,7 @@ gsutil cp test.csv gs://your-bucket/data/
 -- Example: project.dataset.train_table
 ```
 
-### 4. Run Training Job (Modern Approach)
+### 4. Run Training Job
 
 ```python
 from google.cloud import aiplatform
@@ -232,7 +236,7 @@ model = job.run(
     dataset=dataset,  # Uses the dataset created above
     base_output_dir=OUTPUT_DIR,
     replica_count=1,
-    machine_type="n1-highmem-16",
+    machine_type="n1-highmem-8",
     args=[
         "--label", "target",
         "--presets", "best_quality",
@@ -281,6 +285,7 @@ The training component supports configuration through both **environment variabl
 ### Data Input Options
 
 #### Vertex AI Datasets ✨
+
 **NEW**: Native support for Vertex AI managed datasets as custom job inputs:
 
 ```python
@@ -296,6 +301,7 @@ job.run(
 ```
 
 #### Manual Data Sources
+
 For custom data sources (BigQuery, CSV files):
 
 ```python
