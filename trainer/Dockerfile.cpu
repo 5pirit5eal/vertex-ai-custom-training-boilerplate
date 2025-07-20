@@ -16,18 +16,18 @@ RUN uv python install 3.12
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
+    uv sync --no-install-project --no-dev --extra cpu
 
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+    uv sync --no-dev --extra cpu
 
 # Uninstall ray as vertex ai does not support another ray cluster inside the container
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip uninstall ray
 
 # Use the final image without uv
-FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+FROM python:3.12-slim-bookworm
 
 # Copy the application from the builder
 COPY --from=builder --chown=python:python /python /python

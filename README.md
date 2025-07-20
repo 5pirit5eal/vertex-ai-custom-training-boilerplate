@@ -93,7 +93,8 @@ vertex-ai-custom-training-boilerplate/
 ├── build_and_push.sh              # Docker build & push script
 ├── README.md                      # This documentation
 ├── trainer/                       # Training component
-│   ├── Dockerfile                  # Multi-stage Docker build
+│   ├── Dockerfile.cpu              # Dockerfile for CPU
+│   ├── Dockerfile.gpu              # Dockerfile for GPU
 │   ├── pyproject.toml              # Dependencies & configuration
 │   ├── uv.lock                     # Locked dependencies
 │   └── src/trainer/
@@ -103,7 +104,8 @@ vertex-ai-custom-training-boilerplate/
 │       ├── experiment.py            # Vertex AI Experiment tracking
 │       └── vertex.py                # Vertex AI schema and metric utilities
 └── predictor/                     # Prediction component
-    ├── Dockerfile                  # Multi-stage Docker build
+    ├── Dockerfile.cpu              # Dockerfile for CPU
+    ├── Dockerfile.gpu              # Dockerfile for GPU
     ├── pyproject.toml              # Dependencies & configuration
     ├── uv.lock                     # Locked dependencies
     └── src/predictor/
@@ -175,12 +177,20 @@ chmod +x build_and_push.sh
 
 ### 2. Build and Push Images
 
-```bash
-# Build trainer image
-./build_and_push.sh trainer YOUR_PROJECT_ID europe-west3 my-repo
+You can build images for both CPU and GPU architectures.
 
-# Build predictor image  
-./build_and_push.sh predictor YOUR_PROJECT_ID europe-west3 my-repo
+```bash
+# Build CPU trainer image
+./build_and_push.sh trainer cpu YOUR_PROJECT_ID europe-west3 my-repo
+
+# Build GPU trainer image
+./build_and_push.sh trainer gpu YOUR_PROJECT_ID europe-west3 my-repo
+
+# Build CPU predictor image
+./build_and_push.sh predictor cpu YOUR_PROJECT_ID europe-west3 my-repo
+
+# Build GPU predictor image
+./build_and_push.sh predictor gpu YOUR_PROJECT_ID europe-west3 my-repo
 ```
 
 ### 3. Prepare Your Data
@@ -227,8 +237,8 @@ aiplatform.init(
 # Create custom training job
 job = aiplatform.CustomContainerTrainingJob(
     display_name="autogluon-training",
-    container_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-train:latest",
-    model_serving_container_image_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-serve:latest",
+    container_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-train-cpu:latest", # or autogluon-train-gpu
+    model_serving_container_image_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-serve-cpu:latest", # or autogluon-serve-gpu
     model_serving_container_predict_route="/predict",
     model_serving_container_health_route="/health",
     model_serving_container_ports=[8080],
@@ -617,14 +627,20 @@ print(response.json())
 
 ### Build Images
 
-The `build_and_push.sh` script automates the Docker build and push process:
+The `build_and_push.sh` script automates the Docker build and push process for both CPU and GPU architectures:
 
 ```bash
-# Build trainer
-./build_and_push.sh trainer PROJECT_ID REGION ARTIFACT_REGISTRY
+# Build CPU trainer
+./build_and_push.sh trainer cpu PROJECT_ID REGION ARTIFACT_REGISTRY
 
-# Build predictor  
-./build_and_push.sh predictor PROJECT_ID REGION ARTIFACT_REGISTRY
+# Build GPU trainer
+./build_and_push.sh trainer gpu PROJECT_ID REGION ARTIFACT_REGISTRY
+
+# Build CPU predictor
+./build_and_push.sh predictor cpu PROJECT_ID REGION ARTIFACT_REGISTRY
+
+# Build GPU predictor
+./build_and_push.sh predictor gpu PROJECT_ID REGION ARTIFACT_REGISTRY
 ```
 
 **Script Features**:

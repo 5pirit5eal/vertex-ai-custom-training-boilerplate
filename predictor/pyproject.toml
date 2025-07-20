@@ -9,10 +9,12 @@ dependencies = [
     "google-cloud-storage>=3.1.0",
     "litestar[structlog]>=2.16.0",
     "pandas>=2.2.3",
-    "torch==2.6.0",
-    "torchvision==0.21.0",
     "uvicorn>=0.34.3",
 ]
+
+[project.optional-dependencies]
+cpu = ["torch==2.6.0", "torchvision==0.21.0"]
+gpu = ["torch==2.6.0", "torchvision==0.21.0"]
 
 [dependency-groups]
 dev = [
@@ -34,14 +36,17 @@ disable_error_code = ["import-untyped", "attr-defined"]
 [tool.bandit]
 exclude_dirs = ["tests"]
 
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
+
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux/amd64'" },
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-gpu", extra = "gpu" },
 ]
 torchvision = [
-    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux/amd64'" },
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-gpu", extra = "gpu" },
 ]
 
 [[tool.uv.index]]
@@ -50,7 +55,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu126"
+name = "pytorch-gpu"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
