@@ -67,7 +67,7 @@ def _convert_class_labels_to_pred_schema(
     return {
         "type": "object",
         "properties": {
-            str(label): {"type": "float", "format": "float"}
+            str(label): {"type": "number", "format": "float"}
             for label in class_labels
         },
         "required": [str(label) for label in class_labels],
