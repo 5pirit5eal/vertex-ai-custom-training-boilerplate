@@ -91,24 +91,26 @@ This repository provides a production-ready boilerplate for training and serving
 ```text
 vertex-ai-custom-training-boilerplate/
 ├── build_and_push.sh              # Docker build & push script
-├── README.md                       # This documentation
-├── trainer/                        # Training component
+├── README.md                      # This documentation
+├── trainer/                       # Training component
 │   ├── Dockerfile                  # Multi-stage Docker build
-│   ├── pyproject.toml             # Dependencies & configuration
-│   ├── uv.lock                    # Locked dependencies
+│   ├── pyproject.toml              # Dependencies & configuration
+│   ├── uv.lock                     # Locked dependencies
 │   └── src/trainer/
-│       ├── main.py                # Training entry point
-│       ├── config.py              # Configuration management
-│       ├── data.py                # Data loading and processing
-│       ├── experiment.py          # Vertex AI Experiment tracking
-│       └── vertex.py              # Vertex AI schema and metric utilities
+│       ├── main.py                  # Training entry point
+│       ├── config.py                # Configuration management
+│       ├── data.py                  # Data loading and processing
+│       ├── experiment.py            # Vertex AI Experiment tracking
+│       └── vertex.py                # Vertex AI schema and metric utilities
 └── predictor/                     # Prediction component
-    ├── Dockerfile                 # Multi-stage Docker build
-    ├── pyproject.toml            # Dependencies & configuration
-    ├── uv.lock                   # Locked dependencies
+    ├── Dockerfile                  # Multi-stage Docker build
+    ├── pyproject.toml              # Dependencies & configuration
+    ├── uv.lock                     # Locked dependencies
     └── src/predictor/
-        ├── main.py               # Prediction server
-        └── utils.py              # GCS utilities
+        ├── main.py                  # HTTP Server
+        ├── prediction.py            # Prediction service
+        ├── schemas.py               # Request and Response schemas
+        └── utils.py                 # GCS utilities
 ```
 
 ### Key Files
@@ -121,6 +123,9 @@ vertex-ai-custom-training-boilerplate/
 | `trainer/src/trainer/experiment.py` | Experiment Tracking | Manages Vertex AI Experiments, logs learning curves and ROC curves |
 | `trainer/src/trainer/vertex.py` | Vertex AI Utilities | Creates OpenAPI schemas, calculates evaluation metrics for Vertex AI |
 | `predictor/src/predictor/main.py` | Prediction API | Litestar server, health checks, batch inference |
+| `predictor/src/predictor/prediction.py` | Prediction Service | Core prediction logic |
+| `predictor/src/predictor/schemas.py` | Prediction Schemas | Request and response schemas |
+| `predictor/src/predictor/utils.py` | Prediction Utilities | GCS utilities and model loading |
 | `build_and_push.sh` | Deployment automation | Docker build, Artifact Registry push |
 
 ## 🔧 Prerequisites
@@ -225,9 +230,10 @@ job = aiplatform.CustomContainerTrainingJob(
     container_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-train:latest",
     model_serving_container_image_uri="europe-west3-docker.pkg.dev/your-project/my-repo/autogluon-serve:latest",
     model_serving_container_predict_route="/predict",
-    model_serving_container_health_route="/ping",
+    model_serving_container_health_route="/health",
     model_serving_container_ports=[8080],
     model_instance_schema_uri=OUTPUT_DIR + "/model/instance_schema.yaml",
+    model_parameters_schema_uri=OUTPUT_DIR + "/model/parameters_schema.yaml",
     model_prediction_schema_uri=OUTPUT_DIR + "/model/prediction_schema.yaml"
 )
 
@@ -518,17 +524,24 @@ model = job.run(
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ping` | GET | Health check (returns "Model is ready") |
+| `/health` | GET | Health check (returns "Model is ready") |
 | `/predict` | POST | Make predictions on batch data |
 
 ### Prediction Request Format
+
+The prediction service accepts a JSON object with two keys: `instances` and `parameters`.
+
+-   `instances`: A list of instances to predict. Each instance can be a JSON object (dictionary) or a JSON array (list).
+-   `parameters`: An optional dictionary of parameters. The only currently supported parameter is `as_object`, which controls the output format.
+
+#### Example with JSON Objects
 
 ```json
 {
   "instances": [
     {
       "feature1": 1.0,
-      "feature2": "category_a", 
+      "feature2": "category_a",
       "feature3": 42
     },
     {
@@ -537,6 +550,30 @@ model = job.run(
       "feature3": 37
     }
   ]
+}
+```
+
+#### Example with JSON Arrays
+
+```json
+{
+  "instances": [
+    [1.0, "category_a", 42],
+    [2.0, "category_b", 37]
+  ]
+}
+```
+
+#### Example with `as_object` Parameter
+
+```json
+{
+  "instances": [
+    [1.0, "category_a", 42]
+  ],
+  "parameters": {
+    "as_object": true
+  }
 }
 ```
 
@@ -563,7 +600,7 @@ model = job.run(
 import requests
 
 # Health check
-response = requests.get("http://localhost:8501/ping")
+response = requests.get("http://localhost:8501/health")
 print(response.text)  # "Model is ready"
 
 # Predictions
@@ -640,8 +677,8 @@ Training logs are automatically saved to:
 ### Prediction Metrics
 
 The prediction service provides:
-- **Health Checks**: `/ping` endpoint
-- **Request Logging**: All predictions logged
+- **Health Checks**: `/health` endpoint
+- **Structured Logging**: The service uses `structlog` to generate structured, JSON-formatted logs for all requests to the `/predict` endpoint. This includes the full request and response bodies, making it easy to integrate with modern logging and monitoring systems.
 - **Error Handling**: Graceful error responses
 - **Performance Metrics**: Request latency tracking
 
@@ -660,7 +697,7 @@ The prediction service provides:
 
 ```bash
 # Check if model loading completed
-curl http://your-endpoint/ping
+curl http://your-endpoint/health
 ```
 
 #### Issue: Training job OOM errors
