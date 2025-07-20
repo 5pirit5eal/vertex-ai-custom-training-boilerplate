@@ -1,12 +1,15 @@
+"""This module provides functions to read or write data to Google Cloud Storage (GCS) and BigQuery.
+It is necessary for the custom training job to read the training, validation, and test data from GCS.
+It also provides functions to write data to GCS, such as writing evaluation results, instance and prediction schemas, and metadata.
+"""
+
 import json
 import logging
 import os
 from fnmatch import fnmatch
-from typing import Any, Literal
+from typing import Literal
 
 import pandas as pd
-import yaml
-from autogluon.tabular import TabularPredictor
 from google.cloud import bigquery, storage
 
 from trainer.config import Config
@@ -128,7 +131,7 @@ def load_wildcard_csv(config: Config, uri: str) -> pd.DataFrame:
         [
             pd.read_csv(gcs_path(f"gs://{bucket.name}/{blob.name}"))
             for blob in blobs
-            if fnmatch(blob.name, prefix)
+            if fnmatch(blob.name, prefix)  # type: ignore
         ],
         ignore_index=True,
     )
@@ -222,86 +225,4 @@ def write_json(
             json.dump(data, f, skipkeys=True)
     except Exception as e:
         logging.error(f"Error writing JSON to {uri}: {e}", exc_info=e)
-        return
-
-
-def convert_feature_map_to_schema(
-    map: dict[str, tuple[str, tuple]],
-) -> dict[str, Any]:
-    type_map: dict[str, tuple[str, str | None]] = {
-        "int": ("integer", "int64"),
-        "float": ("number", "float"),
-        "object": ("string", None),
-        "category": ("string", None),
-        "bool": ("boolean", None),
-        "datetime": ("string", "date-time"),
-        "text": ("string", None),
-    }
-    properties = {}
-    required = []
-    for feature, dtype in map.items():
-        openapi_type, openapi_format = type_map.get(dtype[0], ("string", None))
-        prop = {"type": openapi_type}
-        if openapi_format:
-            prop["format"] = openapi_format
-        properties[feature] = prop
-        required.append(feature)
-    schema = {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    }
-    return schema
-
-
-def convert_class_labels_to_schema(
-    class_labels: list[str | int],
-) -> dict[str, Any]:
-    """Converts class labels to a schema for OpenAPI 3.0.2, matching a response of
-    a list of dicts where each dict has class labels as keys and probabilities as values.
-
-    Args:
-        class_labels (list[str | int]): The list of class labels.
-
-    Returns:
-        dict[str, Any]: The schema for the class labels.
-    """
-    return {
-        "type": "object",
-        "properties": {
-            str(label): {"type": "number"} for label in class_labels
-        },
-        "required": [str(label) for label in class_labels],
-        "additionalProperties": False,
-    }
-
-
-def write_instance_and_prediction_schemas(
-    config: Config, predictor: TabularPredictor
-) -> None:
-    """Creates and saves the parameters and results schema for the model
-    as YAML-files.
-
-    Args:
-        config (Config): The configuration object containing the model export URI.
-        predictor (TabularPredictor): The predictor object containing the model parameters and results.
-    """
-    try:
-        feature_metadata_dict = predictor.feature_metadata_in.to_dict()
-        classes = predictor.class_labels
-
-        feature_schema = convert_feature_map_to_schema(feature_metadata_dict)
-        label_schema = convert_class_labels_to_schema(classes)
-
-        # Write the schema to a YAML file
-        for schema, filename in [
-            (feature_schema, "instance_schema.yaml"),
-            (label_schema, "prediction_schema.yaml"),
-        ]:
-            schema_path = gcs_path(config.model_export_uri, filename)
-            os.makedirs(os.path.dirname(schema_path), exist_ok=True)
-            with open(schema_path, "w") as f:
-                yaml.dump(schema, f, sort_keys=False)
-    except Exception as e:
-        logging.error(f"Error writing schemas: {e}", exc_info=e)
         return

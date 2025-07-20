@@ -7,7 +7,7 @@ dependencies = [
     "autogluon-tabular[all]>=1.3.1",
     "autogluon-multimodal==1.3.1",
     "google-cloud-storage>=3.1.0",
-    "litestar>=2.16.0",
+    "litestar[structlog]>=2.16.0",
     "pandas>=2.2.3",
     "torch==2.6.0",
     "torchvision==0.21.0",
@@ -15,7 +15,14 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["bandit>=1.8.0", "mypy>=1.13.0", "pytest>=8.3.5", "ruff>=0.12.1"]
+dev = [
+    "bandit>=1.8.0",
+    "mypy>=1.13.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.12.1",
+]
 
 [tool.ruff]
 line-length = 80

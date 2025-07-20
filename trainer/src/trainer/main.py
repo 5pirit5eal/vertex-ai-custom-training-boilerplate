@@ -1,7 +1,5 @@
 import logging
 import os
-import random
-import string
 import sys
 
 import pandas as pd
@@ -14,22 +12,23 @@ from trainer.data import (
     gcs_path,
     load_data,
     write_df,
-    write_instance_and_prediction_schemas,
     write_json,
 )
-from trainer.log_experiment import (
-    log_metadata,
+from trainer.experiment import (
     log_nested_metrics,
     log_roc_curve,
+    setup_experiment,
+    write_metadata,
+)
+from trainer.vertex import (
+    create_multiclass_vertex_ai_eval,
+    create_vertex_ai_eval,
+    write_model_schemas,
 )
 
 
-# Generate a uuid of length 8
-def generate_uuid():
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-
-
-def main():
+def setup_run() -> Config:
+    """Sets up the run by loading the configuration and initializing logging."""
     logging.basicConfig(
         level=logging.DEBUG,
         handlers=[logging.StreamHandler(sys.stdout)],
@@ -61,57 +60,21 @@ def main():
 
     # Initialize the Vertex AI SDK
     if config.experiment_name:
-        logging.info("Initializing Vertex AI SDK...")
-        existing_tensorboards = aiplatform.Tensorboard.list(
-            filter=f"display_name={config.experiment_name} AND labels.ytrue={config.label}",
-            location=config.region,
-            project=config.project_id,
-        )
-        if existing_tensorboards:
-            logging.info(
-                "Found existing Tensorboard for this experiment, using it: %s",
-                existing_tensorboards[0].name,
-            )
-            tensorboard = aiplatform.Tensorboard(
-                existing_tensorboards[0].resource_name
-            )
-        else:
-            logging.info(
-                "No existing Tensorboard found for this experiment, creating a new one."
-            )
-            tensorboard = aiplatform.Tensorboard.create(
-                display_name=config.experiment_name,
-                location=config.region,
-                project=config.project_id,
-                labels={"ytrue": config.label},
-                is_default=True,
-            )
+        setup_experiment(config)
 
-        aiplatform.init(
-            project=config.project_id,
-            location=config.region,
-            experiment=config.experiment_name,
-            experiment_tensorboard=tensorboard,
-            staging_bucket=gcs_path(config.model_export_uri),
-        )
-        if config.experiment_run_name:
-            aiplatform.start_run(config.experiment_run_name)
-        else:
-            UUID = generate_uuid()
-            aiplatform.start_run(f"autogluon-{config.label}-{UUID}")
+    return config
 
-        aiplatform.log_params(config.to_dict())
 
-    # Load the data
-    logging.info("Loading data...")
-    train_df, val_df, test_df = load_data(config)
+def load_predictor(config: Config, columns: list[str]) -> TabularPredictor:
+    """Loads or creates a TabularPredictor based on the configuration.
 
-    if config.sample_weight not in train_df.columns:
-        logging.info(
-            f"Weight column '{config.sample_weight}' not found in training data. No weighting will be applied."
-        )
+    Args:
+        config (Config): The configuration object containing the model URIs.
+        columns (list[str]): The list of columns in the training data.
 
-    # Create a TabularPredictor.
+    Returns:
+        TabularPredictor: The loaded or newly created TabularPredictor.
+    """
     if config.model_import_uri is not None:
         logging.info("Importing model from checkpoint...")
         predictor: TabularPredictor = TabularPredictor.load(
@@ -126,10 +89,10 @@ def main():
     else:
         predictor = TabularPredictor(
             label=config.label,
-            eval_metric=config.eval_metric,
+            eval_metric=config.eval_metric,  # type: ignore
             sample_weight=config.sample_weight
             if (
-                config.sample_weight in train_df.columns
+                config.sample_weight in columns
                 or config.sample_weight in ["auto_weight", "balanced_weight"]
             )  # type: ignore
             else None,  # type: ignore
@@ -137,100 +100,7 @@ def main():
             log_to_file=False,
         )
 
-    # Fit the model
-    logging.info("Fitting model...")
-    predictor.fit(
-        train_data=train_df,
-        tuning_data=val_df,
-        presets=config.presets,
-        time_limit=config.time_limit,
-        num_gpus="auto" if config.use_gpu and torch.cuda.is_available() else 0,
-        hyperparameters=config.hyperparameters,
-        # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
-        ag_args_ensemble={
-            "fold_fitting_strategy": "sequential_local",
-        },  # Required as ray is incompatible with vertex ai custom training
-        learning_curves=True,
-    )
-
-    log_metadata(
-        config=config,
-        predictor=predictor,
-        prefix="train",
-    )
-
-    if config.refit_full:
-        # Refit the model on the train and validation data
-        logging.info("Refitting model on full training data...")
-        predictor_refit: TabularPredictor = predictor.clone(
-            path=gcs_path(config.checkpoint_uri, "refit_full"),
-            return_clone=True,
-            dirs_exist_ok=True,
-        )
-
-        predictor_refit.refit_full(fit_strategy="auto")
-
-        log_metadata(
-            config=config,
-            predictor=predictor_refit,
-            prefix="refit_full",
-        )
-
-        predictor_test = predictor_refit
-    else:
-        predictor_test = predictor
-
-    # Predict on training data
-    for prefix, df in [
-        ("train", train_df),
-        ("val", val_df),
-        ("test", test_df),
-    ]:
-        if df is not None:
-            logging.info(f"Predicting on {prefix} data and writing results...")
-            evaluate_df(config, df, predictor_test, prefix)
-        else:
-            logging.info(f"No {prefix} data available for evaluation.")
-
-    if config.experiment_name:
-        write_df(
-            config,
-            predictor_test.leaderboard(
-                test_df, refit_full=config.refit_full, display=True
-            ),
-            "test_leaderboard.csv",
-        )
-
-    if test_df is not None:
-        # Do feature importance calculation last, as it can be time-consuming
-        # and we want to ensure all other metrics are logged first.
-        if config.calculate_importance:
-            logging.info(
-                "Calculating and writing feature importance dataframe..."
-            )
-            write_df(
-                config,
-                predictor_test.feature_importance(
-                    test_df,
-                    time_limit=0.2 * config.time_limit  # type: ignore
-                    if config.time_limit
-                    else None,
-                ),
-                "test_feature_importance.csv",
-            )
-
-    write_instance_and_prediction_schemas(
-        config=config,
-        predictor=predictor_test,
-    )
-    logging.info("Exporting deployment model for inference...")
-    predictor_test.clone_for_deployment(
-        path=gcs_path(config.model_export_uri),
-        dirs_exist_ok=True,
-    )
-    if config.experiment_name:
-        logging.info(f"{config.experiment_name} completed successfully.")
-        aiplatform.end_run()
+    return predictor
 
 
 def evaluate_df(
@@ -240,7 +110,15 @@ def evaluate_df(
     prefix: str,
     save_predictions: bool = False,  # To be changed once the predictions are useful
 ) -> None:
-    """Evaluates the model on the given DataFrame and writes the results to GCS."""
+    """Evaluates the model on the given DataFrame and writes the results to GCS.
+
+    Args:
+        config (Config): The configuration object containing the model URIs.
+        df (pd.DataFrame): The DataFrame to evaluate.
+        predictor (TabularPredictor): The trained AutoGluon model.
+        prefix (str): The prefix for the output files.
+        save_predictions (bool): Whether to save the predictions to GCS.
+    """
     predictions: pd.DataFrame = predictor.predict_proba(df)  # type: ignore
     if save_predictions:
         # Write the predictions to a CSV file in GCS
@@ -250,7 +128,7 @@ def evaluate_df(
             filename=f"{prefix}_predictions.csv",
         )
 
-    logging.info(f"Evaluating {prefix} data...")
+    logging.info(f"EVALUATING {prefix.upper()} DATA")
     # Evaluate the model
     evaluation = predictor.evaluate_predictions(
         y_true=df[config.label],
@@ -275,8 +153,9 @@ def evaluate_df(
         data=evaluation,
         filename=f"{prefix}_evaluation.json",
     )
+
     if config.experiment_name:
-        logging.info("Logging evaluation metrics to Vertex AI...")
+        logging.info(f"Logging evaluation metrics for {prefix} to Vertex AI...")
         classification_report: dict = evaluation.pop(
             "classification_report", {}
         )
@@ -286,7 +165,6 @@ def evaluate_df(
         evaluation.pop("confusion_matrix", None)
         aiplatform.log_metrics(evaluation)
 
-    if config.experiment_name:
         if predictor.problem_type == "binary":
             logging.info(f"Logging {prefix} ROC curve...")
             positive_class = predictor.positive_class
@@ -308,6 +186,163 @@ def evaluate_df(
             matrix=confusion_matrix.to_numpy().tolist(),
             display_name=f"Confusion Matrix - {prefix.upper()} " + config.label,
         )
+
+
+def evaluate_test_df(
+    config: Config,
+    test_df: pd.DataFrame,
+    predictor: TabularPredictor,
+    df: pd.DataFrame,
+) -> None:
+    """Evaluates the model on the test DataFrame and writes the results to GCS.
+
+    Args:
+        config (Config): The configuration object containing the model URIs.
+        test_df (pd.DataFrame): The DataFrame to evaluate.
+        predictor (TabularPredictor): The trained AutoGluon model.
+        predictor_test (TabularPredictor): The predictor to use for testing.
+        df (pd.DataFrame): The DataFrame containing the test data.
+    """
+    logging.info("Evaluating test data...")
+    if config.experiment_name:
+        write_df(
+            config,
+            predictor.leaderboard(
+                test_df, refit_full=config.refit_full, display=True
+            ),
+            "leaderboard.csv",
+        )
+        # Do feature importance calculation last, as it can be time-consuming
+        # and we want to ensure all other metrics are logged first.
+    if config.calculate_importance:
+        logging.info("Calculating and writing feature importance dataframe...")
+        write_df(
+            config,
+            predictor.feature_importance(
+                test_df,
+                time_limit=0.2 * config.time_limit  # type: ignore
+                if config.time_limit
+                else None,
+            ),
+            "test_feature_importance.csv",
+        )
+
+    predictions: pd.DataFrame = predictor.predict_proba(test_df)  # type: ignore
+    if predictor.problem_type == "binary":
+        logging.info("Creating Vertex AI evaluation...")
+        positive_class = predictor.positive_class
+        vertex_eval = create_vertex_ai_eval(
+            label_column=config.label,
+            positive_class=positive_class,
+            df=df,
+            predictions=predictions,
+        )
+        write_json(
+            config=config,
+            data=vertex_eval,
+            filename="vertex_ai_evaluation.json",
+        )
+    elif predictor.problem_type == "multiclass":
+        logging.info("Creating Vertex AI evaluation for multiclass...")
+        vertex_eval = create_multiclass_vertex_ai_eval(
+            label_column=config.label,
+            df=df,
+            predictions=predictions,
+            labels=predictor.class_labels,
+        )
+        write_json(
+            config=config,
+            data=vertex_eval,
+            filename="vertex_ai_evaluation.json",
+        )
+
+
+def main() -> None:
+    """Main function to run the training and evaluation process."""
+    config: Config = setup_run()
+
+    # Load the data
+    logging.info("Loading data...")
+    train_df, val_df, test_df = load_data(config)
+
+    if config.sample_weight not in train_df.columns:
+        logging.info(
+            f"Weight column '{config.sample_weight}' not found in training data. No weighting will be applied."
+        )
+
+    # Create a TabularPredictor.
+    predictor = load_predictor(config, train_df.columns.to_list())
+
+    # Fit the model
+    logging.info("Fitting model...")
+    predictor.fit(
+        train_data=train_df,
+        tuning_data=val_df,  # type: ignore
+        presets=config.presets,
+        time_limit=config.time_limit,  # type: ignore
+        num_gpus="auto" if config.use_gpu and torch.cuda.is_available() else 0,
+        hyperparameters=config.hyperparameters,  # type: ignore
+        # hyperparameter_tune_kwargs="auto" if config.hyperparameters else None,
+        ag_args_ensemble={
+            "fold_fitting_strategy": "sequential_local",
+        },  # Required as ray is incompatible with vertex ai custom training
+        learning_curves=True,
+    )
+
+    write_metadata(
+        config=config,
+        predictor=predictor,
+        prefix="train",
+    )
+
+    if config.refit_full:
+        # Refit the model on the train and validation data
+        logging.info("Refitting model on full training data...")
+        predictor_refit: TabularPredictor = predictor.clone(  # type: ignore
+            path=gcs_path(config.checkpoint_uri, "refit_full"),
+            return_clone=True,
+            dirs_exist_ok=True,
+        )
+
+        predictor_refit.refit_full(fit_strategy="auto")
+
+        write_metadata(
+            config=config,
+            predictor=predictor_refit,
+            prefix="refit_full",
+        )
+
+        predictor_test = predictor_refit
+    else:
+        predictor_test = predictor
+
+    # Predict on training data
+    for prefix, df in [
+        ("train", train_df),
+        ("val", val_df),
+        ("test", test_df),
+    ]:
+        if df is not None:
+            logging.info(f"Predicting on {prefix} data and writing results...")
+            evaluate_df(config, df, predictor_test, prefix)
+        else:
+            logging.info(f"No {prefix} data available for evaluation.")
+
+    if test_df is not None:
+        evaluate_test_df(config, test_df, predictor_test, test_df)
+
+    write_model_schemas(
+        config=config,
+        predictor=predictor_test,
+    )
+    logging.info("Exporting deployment model for inference...")
+    predictor_test.clone_for_deployment(
+        path=gcs_path(config.model_export_uri),
+        dirs_exist_ok=True,
+    )
+    if config.experiment_name and not config.resume:
+        logging.info(f"{config.experiment_name} completed successfully.")
+        aiplatform.end_run()
 
 
 if __name__ == "__main__":

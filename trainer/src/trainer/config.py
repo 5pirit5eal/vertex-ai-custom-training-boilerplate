@@ -1,3 +1,5 @@
+"""This module defines the configuration for the training job."""
+
 import os
 from typing import Any, Literal
 
@@ -40,6 +42,7 @@ class Config(msgspec.Struct):
     # Vertex AI experiment variables
     experiment_name: str | None = None
     experiment_run_name: str | None = None
+    resume: bool = False
 
     def __post_init__(self) -> None:
         """Validates the metadata for correctness."""
@@ -114,6 +117,14 @@ class Config(msgspec.Struct):
             if self.hyperparameters is None:
                 self.hyperparameters = {}
             self.hyperparameters.update(get_hyperparameter_config("multimodal"))
+
+        if (
+            self.experiment_run_name is not None
+            and self.experiment_name is None
+        ):
+            raise ValueError(
+                "Experiment name must be provided if experiment run name is set."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Converts the Config object to a dictionary."""
@@ -254,6 +265,12 @@ class Config(msgspec.Struct):
 @click.option(
     "--experiment-run-name",
     help="Experiment run name for Vertex AI",
+)
+@click.option(
+    "--resume",
+    help="Resume the experiment run if it already exists. This will also cause the experiment to not stop the run.",
+    is_flag=True,
+    default=False,
 )
 def load_config(**kwargs) -> Config:
     """Loads the metadata from environment variables including preconfigured vertex ai custom training variables."""
