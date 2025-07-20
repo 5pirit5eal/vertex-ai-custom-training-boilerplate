@@ -216,7 +216,6 @@ class Config(msgspec.Struct):
             "good_quality",
             "medium_quality",
             "experimental_quality",
-            "optimize_for_deployment",
             "interpretable",
             "ignore_text",
         ]
