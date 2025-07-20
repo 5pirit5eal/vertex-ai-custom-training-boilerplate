@@ -329,7 +329,7 @@ def main() -> None:
             logging.info(f"No {prefix} data available for evaluation.")
 
     if test_df is not None:
-        evaluate_test_df(config, test_df, predictor_test, df)
+        evaluate_test_df(config, test_df, predictor_test, test_df)
 
     write_model_schemas(
         config=config,
