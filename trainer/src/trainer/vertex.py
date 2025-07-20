@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 import yaml
 from autogluon.tabular import TabularPredictor
-from numpy import inf, linspace
+from numpy import inf, linspace, ndarray
 from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
@@ -67,16 +67,15 @@ def _convert_class_labels_to_pred_schema(
     return {
         "type": "object",
         "properties": {
-            str(label): {"type": "number"} for label in class_labels
+            str(label): {"type": "float", "format": "float"}
+            for label in class_labels
         },
         "required": [str(label) for label in class_labels],
     }
 
 
-def write_instance_and_prediction_schemas(
-    config: Config, predictor: TabularPredictor
-) -> None:
-    """Creates and saves the parameters and results schema for the model
+def write_model_schemas(config: Config, predictor: TabularPredictor) -> None:
+    """Creates and saves the instance, parameters and prediction schema for the model
     as YAML-files.
 
     Args:
@@ -122,7 +121,7 @@ def calculate_roc_curve(
     positive_class: str | int,
     df: pd.DataFrame,
     predictions: pd.DataFrame,
-):
+) -> tuple[ndarray, ndarray, ndarray]:
     """Calculates the ROC curve for a binary classification problem.
 
     Args:

@@ -1,6 +1,8 @@
 """This module provides functions to log experiment results to Google Cloud Vertex AI Experiments."""
 
 import logging
+import random
+import string
 import time
 from typing import Any
 
@@ -8,14 +10,91 @@ import pandas as pd
 from autogluon.tabular import TabularPredictor
 from google.cloud import aiplatform
 
-
 from trainer.config import Config
 from trainer.data import write_json
 from trainer.vertex import calculate_roc_curve
 
 
+# Generate a uuid of length 8
+def generate_uuid():
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+
+def get_tensorboard(config: Config) -> aiplatform.Tensorboard:
+    """Initializes or retrieves a Tensorboard instance for the experiment.
+    If a Tensorboard with the same name already exists, it will be used.
+    If not, a new Tensorboard will be created.
+
+    Args:
+        config (Config): The configuration object containing experiment settings.
+
+    Returns:
+        aiplatform.Tensorboard: The Tensorboard instance for the experiment.
+    """
+
+    existing_tensorboards = aiplatform.Tensorboard.list(
+        filter=f"display_name={config.experiment_name} AND labels.ytrue={config.label}",
+        location=config.region,
+        project=config.project_id,
+    )
+    if existing_tensorboards:
+        logging.info(
+            "Found existing Tensorboard for this experiment, using it: %s",
+            existing_tensorboards[0].name,
+        )
+        tensorboard = aiplatform.Tensorboard(
+            existing_tensorboards[0].resource_name
+        )
+    else:
+        logging.info(
+            "No existing Tensorboard found for this experiment, creating a new one."
+        )
+        tensorboard = aiplatform.Tensorboard.create(
+            display_name=config.experiment_name,
+            location=config.region,
+            project=config.project_id,
+            labels={"ytrue": config.label},
+            is_default=True,
+        )
+
+    return tensorboard
+
+
+def setup_experiment(config: Config) -> None:
+    """Sets up the Vertex AI experiment environment.
+
+    Initializes the Vertex AI SDK, sets up the experiment and tensorboard,
+    and starts the experiment run if specified.
+
+    Args:
+        config (Config): The configuration object containing experiment settings.
+    """
+    logging.info("Initializing Vertex AI SDK...")
+    tensorboard = get_tensorboard(config)
+    aiplatform.init(
+        project=config.project_id,
+        location=config.region,
+        experiment=config.experiment_name,
+        experiment_tensorboard=tensorboard,
+    )
+    if config.experiment_run_name:
+        aiplatform.start_run(config.experiment_run_name, resume=config.resume)
+    else:
+        UUID = generate_uuid()
+        aiplatform.start_run(
+            f"autogluon-{config.label}-{UUID}", resume=config.resume
+        )
+
+    aiplatform.log_params(config.to_dict())
+
+
 def log_nested_metrics(metrics: dict[str, Any], prefix: str = "") -> None:
-    """Recursively logs metrics to an aiplatform experiment."""
+    """Recursively logs metrics to an aiplatform experiment.
+
+    Args:
+        metrics (dict[str, Any]): The metrics to log, which can be nested.
+        prefix (str): The prefix to use for the metric names.
+    """
     for key, value in metrics.items():
         if isinstance(value, dict):
             if prefix:
@@ -68,10 +147,16 @@ def log_learning_curves(model_data: dict[str, list]) -> None:
         return
 
 
-def log_metadata(
+def write_metadata(
     config: Config, predictor: TabularPredictor, prefix: str
 ) -> None:
-    """Logs metadata about the run to GCS."""
+    """Logs metadata about the run to GCS.
+
+    Args:
+        config (Config): The configuration object containing the data URI.
+        predictor (TabularPredictor): The trained AutoGluon predictor.
+        prefix (str): The prefix for the metadata files.
+    """
     logging.info("Writing metadata and learning curves to GCS...")
     summary = predictor.fit_summary(show_plot=False)
     del summary["leaderboard"]

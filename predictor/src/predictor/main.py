@@ -13,8 +13,8 @@ from litestar.middleware.logging import LoggingMiddlewareConfig
 from litestar.plugins.structlog import StructlogConfig, StructlogPlugin
 from litestar.status_codes import (
     HTTP_200_OK,
-    HTTP_503_SERVICE_UNAVAILABLE,
     HTTP_500_INTERNAL_SERVER_ERROR,
+    HTTP_503_SERVICE_UNAVAILABLE,
 )
 from torch.cuda import is_available
 
