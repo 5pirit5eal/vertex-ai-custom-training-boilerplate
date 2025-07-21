@@ -1,19 +1,22 @@
 """Tests for the prediction service."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 
 import pandas as pd
+import numpy as np
 import pytest
 from autogluon.tabular import TabularPredictor
 
 from predictor.prediction import create_prediction
+from predictor.schemas import AutoMLComponents
 
 
 @pytest.fixture
 def mock_predictor() -> MagicMock:
     """Returns a mock TabularPredictor."""
     predictor = MagicMock(spec=TabularPredictor)
+    predictor.class_labels = ["class1", "class2"]
     predictor.feature_metadata_in.to_dict.return_value = {
         "feat1": "int",
         "feat2": "float",
@@ -26,14 +29,20 @@ def test_create_prediction_with_dict_instances(
     mock_predictor: MagicMock,
 ) -> None:
     """Tests the create_prediction with dictionary instances."""
-    instances: list[dict[str, Any] | list[Any]] = [{"feat1": 1, "feat2": 2.0}]
-    mock_predictor.predict_proba.return_value = pd.DataFrame(
-        [[0.1, 0.9]], columns=["class1", "class2"]
+    instances: list[dict[str, Any] | list[Any]] = [
+        {"feat1": 1, "feat2": 2.0},
+        {"feat1": 1, "feat2": 2.0},
+    ]
+    mock_predictor.predict_proba.return_value = np.array(
+        [[0.1, 0.9], [0.1, 0.9]]
     )
 
     result = create_prediction(mock_predictor, instances)
 
-    assert result == [{"class1": 0.1, "class2": 0.9}]
+    assert result == [
+        AutoMLComponents(classes=["class1", "class2"], scores=[0.1, 0.9]),
+        AutoMLComponents(classes=["class1", "class2"], scores=[0.1, 0.9]),
+    ]
 
 
 def test_create_prediction_with_list_instances(
@@ -41,13 +50,13 @@ def test_create_prediction_with_list_instances(
 ) -> None:
     """Tests the create_prediction with list instances."""
     instances: list[dict[str, Any] | list[Any]] = [[1, 2.0]]
-    mock_predictor.predict_proba.return_value = pd.DataFrame(
-        [[0.1, 0.9]], columns=["class1", "class2"]
-    ).values
+    mock_predictor.predict_proba.return_value = np.array([[0.1, 0.9]])
 
     result = create_prediction(mock_predictor, instances)
 
-    assert result == [[0.1, 0.9]]
+    assert result == [
+        AutoMLComponents(classes=["class1", "class2"], scores=[0.1, 0.9])
+    ]
 
 
 def test_create_prediction_with_as_object_true(
@@ -63,6 +72,7 @@ def test_create_prediction_with_as_object_true(
     result = create_prediction(mock_predictor, instances, parameters)
 
     assert result == [{"class1": 0.1, "class2": 0.9}]
+    mock_predictor.predict_proba.assert_called_once_with(ANY, as_pandas=True)
 
 
 def test_create_prediction_with_as_object_false(
@@ -71,13 +81,13 @@ def test_create_prediction_with_as_object_false(
     """Tests the create_prediction with as_object=False."""
     instances: list[dict[str, Any] | list[Any]] = [{"feat1": 1, "feat2": 2.0}]
     parameters = {"as_object": False}
-    mock_predictor.predict_proba.return_value = pd.DataFrame(
-        [[0.1, 0.9]], columns=["class1", "class2"]
-    ).values
+    mock_predictor.predict_proba.return_value = np.array([[0.1, 0.9]])
 
     result = create_prediction(mock_predictor, instances, parameters)
 
-    assert result == [[0.1, 0.9]]
+    assert result == [
+        AutoMLComponents(classes=["class1", "class2"], scores=[0.1, 0.9])
+    ]
 
 
 def test_create_prediction_unsupported_problem_type(

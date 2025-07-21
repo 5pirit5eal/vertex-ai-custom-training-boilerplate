@@ -37,17 +37,31 @@ def _convert_feature_map_to_input_schema(
     }
     properties = {}
     required = []
+    example = {}
     for feature, dtype in map.items():
         openapi_type, openapi_format = type_map.get(dtype[0], ("string", None))
-        prop = {"type": openapi_type}
+        prop = {"type": openapi_type, "nullable": True}
         if openapi_format:
             prop["format"] = openapi_format
         properties[feature] = prop
         required.append(feature)
+
+        if dtype[0] == "int":
+            example[feature] = 0
+        elif dtype[0] == "float":
+            example[feature] = 0.0
+        elif dtype[0] == "bool":
+            example[feature] = True
+        elif dtype[0] == "datetime":
+            example[feature] = "2023-01-01T00:00:00Z"
+        elif dtype[0] in ["text", "category", "object"]:
+            example[feature] = "example text"
+
     schema = {
         "type": "object",
-        "properties": properties,
         "required": required,
+        "properties": properties,
+        "example": example,
     }
     return schema
 
@@ -65,12 +79,31 @@ def _convert_class_labels_to_pred_schema(
         dict[str, Any]: The schema for the class labels.
     """
     return {
+        "title": "TabularClassification",
+        "description": "Schema for classification predictions",
         "type": "object",
         "properties": {
-            str(label): {"type": "number", "format": "float"}
-            for label in class_labels
+            "classes": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [str(label) for label in class_labels],
+                    "description": "List of class labels",
+                },
+            },
+            "scores": {
+                "type": "array",
+                "items": {
+                    "type": "number",
+                    "format": "float",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
+                "description": "List of class probabilities for each class",
+            },
         },
-        "required": [str(label) for label in class_labels],
+        "x-batchpredict-csv-classification-labels": "classes",
+        "x-target-column-name": "target",
     }
 
 

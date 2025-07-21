@@ -19,7 +19,10 @@ from litestar.status_codes import (
 from torch.cuda import is_available
 
 from predictor.prediction import create_prediction
-from predictor.schemas import PredictionRequest, PredictionResponse
+from predictor.schemas import (
+    PredictionRequest,
+    PredictionResponse,
+)
 from predictor.utils import load_model
 
 # Constants
