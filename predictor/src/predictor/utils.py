@@ -1,19 +1,35 @@
 """Utility functions for the prediction server."""
 
+import sys
 import logging
+import json
 import os
 import random
 import threading
+import warnings
 from typing import Any
+import time
 
+import structlog
+from contextvars import ContextVar
+from structlog.typing import Processor
+from structlog_gcp import build_gcp_processors
 import pandas as pd
 from autogluon.tabular import TabularPredictor
 from google.cloud import storage
+from litestar.connection import ASGIConnection
+from litestar.middleware import MiddlewareProtocol
+from litestar.types import ASGIApp, Receive, Scope, Send
+from litestar.enums import ScopeType
 
 PROJECT_ID = os.getenv("PROJECT_ID")
 REGION = os.getenv("REGION")
 GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
+
+request_start_time_var: ContextVar[float | None] = ContextVar(
+    "request_start_time", default=None
+)
 
 
 def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
@@ -28,6 +44,7 @@ def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
       gcs_dir: A string of directory path on GCS.
       local_dir: A string of local directory path.
     """
+    logger = structlog.get_logger(__name__)
     if not gcs_dir.startswith("gs://"):
         raise ValueError(f"{gcs_dir} is not a GCS path starting with gs://.")
     bucket_name = gcs_dir.split("/")[2]
@@ -40,7 +57,11 @@ def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
         file_path = blob.name[len(prefix) :].strip("/")
         local_file_path = os.path.join(local_dir, file_path)
         os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-        print("Downloading", file_path, "to", local_file_path)
+        logger.info(
+            "Downloading file",
+            file_path=file_path,
+            local_file_path=local_file_path,
+        )
         blob.download_to_filename(local_file_path)
 
 
@@ -107,11 +128,12 @@ def load_model() -> TabularPredictor:
     This function includes logic to handle multiple workers trying to download the model
     at the same time.
     """
+    logger = structlog.get_logger(__name__)
     # Wait the thread for a random few seconds to avoid race conditions
     threading.Event().wait(random.randint(0, 5))
 
     model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
-    logging.info(f"Model directory passed by the user is: {model_dir}")
+    logger.info("Model directory passed by user", model_dir=model_dir)
 
     if model_dir.startswith(GCS_URI_PREFIX):
         gcs_path = model_dir[len(GCS_URI_PREFIX) :]
@@ -123,22 +145,177 @@ def load_model() -> TabularPredictor:
             while not os.path.exists(
                 os.path.join(local_model_dir, "version.txt")
             ):
-                logging.info("Waiting until Model is finished downloading...")
+                logger.info("Waiting until Model is finished downloading...")
                 threading.Event().wait(15)
 
             # Ensure the version.txt file is fully loaded before proceeding
             threading.Event().wait(5)
         else:
-            logging.info(f"Downloading {model_dir} to {local_model_dir}")
+            logger.info(
+                "Downloading model",
+                source=model_dir,
+                destination=local_model_dir,
+            )
             download_gcs_dir_to_local(model_dir, local_model_dir)
-            logging.info(f"Finished downloading model to {local_model_dir}")
+            logger.info(
+                "Finished downloading model", destination=local_model_dir
+            )
 
         return TabularPredictor.load(local_model_dir)
 
     else:
-        logging.info(f"Model directory is local: {model_dir}")
+        logger.info("Model directory is local", model_dir=model_dir)
         if not os.path.exists(model_dir):
             raise FileNotFoundError(
                 f"Model directory {model_dir} does not exist."
             )
         return TabularPredictor.load(model_dir)
+
+
+def setup_logging(service: str) -> None:
+    """Sets up structured logging with GCP processors."""
+    gcp_processors: list[Processor] = build_gcp_processors(service=service)
+    shared_processors = [
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+    ]
+
+    structlog.configure(
+        processors=[
+            # Prepare event dict for `ProcessorFormatter`.
+            *shared_processors,
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    formatter = structlog.stdlib.ProcessorFormatter(
+        # These processors are applied to all log entries, not just structlog ones
+        foreign_pre_chain=shared_processors,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            *gcp_processors,
+            structlog.processors.JSONRenderer(),
+        ],
+    )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    # Configure the root logger to use our structured formatter
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
+    # Apply the same configuration to specific loggers to ensure consistency
+    for logger_name in [
+        "litestar",
+        "autogluon",
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+    ]:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        # Prevent propagation to avoid duplicate logs
+        logger.propagate = False
+
+    structlog.get_logger().info("StructLogging initialized.")
+    # Use structlog for this message too
+    structlog.get_logger().info("Logging setup complete.")
+
+    # Configure warnings to use the logging system
+    logging.captureWarnings(True)
+    warnings_logger = logging.getLogger("py.warnings")
+    warnings_logger.handlers.clear()
+    warnings_logger.addHandler(handler)
+    warnings_logger.setLevel(logging.WARNING)
+    warnings_logger.propagate = False
+
+
+class LoggingMiddleware(MiddlewareProtocol):
+    """Log HTTP requests and responses."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Initialize the middleware with a logger."""
+        self.app = app
+        self.logger: structlog.stdlib.BoundLogger = structlog.get_logger().bind(
+            component="http"
+        )
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        """Handle the ASGI request and log details."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Record start time
+        start_time = time.time()
+        request_start_time_var.set(start_time)
+
+        # Extract request details
+        connection = ASGIConnection(scope=scope)
+        method = scope["method"]
+        path = scope["path"]
+        query_string = scope.get("query_string", b"").decode("utf-8")
+
+        # Skip health check logging to reduce noise
+        if path == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        # Log request start
+        self.logger.info(
+            "request_started",
+            method=method,
+            path=path,
+            query_string=query_string if query_string else None,
+            client_ip=connection.client.host if connection.client else None,
+            user_agent=connection.headers.get("user-agent"),
+        )
+
+        # Track response status
+        status_code = 500  # Default to error if not set
+        body = None
+
+        async def send_wrapper(message) -> None:
+            nonlocal status_code, body
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
+            elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception as e:
+            duration = time.time() - start_time
+            self.logger.error(
+                "request_failed",
+                exc_info=True,
+                method=method,
+                path=path,
+                duration_ms=round(duration * 1000, 2),
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+            raise
+        else:
+            # Log request completion
+            duration = time.time() - start_time
+            self.logger.info(
+                "request_completed",
+                jsonPayload=json.loads(body.decode("utf-8")) if body else None,
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_ms=round(duration * 1000, 2),
+            )
+        finally:
+            request_start_time_var.set(None)

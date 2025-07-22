@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litestar.status_codes import (
     HTTP_200_OK,
-    HTTP_201_CREATED,
     HTTP_500_INTERNAL_SERVER_ERROR,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
@@ -46,7 +45,7 @@ def test_predict_endpoint(
     mock_create_prediction.return_value = [[0.1, 0.9]]
 
     response = test_client.post("/predict", json={"instances": [[1, 2.0]]})
-    assert response.status_code == HTTP_201_CREATED
+    assert response.status_code == HTTP_200_OK
     assert response.json() == {"predictions": [[0.1, 0.9]]}
 
 

@@ -20,7 +20,7 @@ class AutoMLComponents(Struct):
 
 
 class PredictionResponse(Struct):
-    """Represents a prediction response
+    """Represents a prediction response body.
 
     A response either conforms to the AutoML response format or contains a list of key-value pairs,
     class label to score.

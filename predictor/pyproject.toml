@@ -10,6 +10,7 @@ dependencies = [
     "litestar[structlog]>=2.16.0",
     "pandas>=2.2.3",
     "uvicorn>=0.34.3",
+    "structlog-gcp>=0.5.0",
 ]
 
 [project.optional-dependencies]
