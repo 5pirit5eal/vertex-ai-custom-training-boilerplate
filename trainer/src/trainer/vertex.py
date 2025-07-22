@@ -103,7 +103,6 @@ def _convert_class_labels_to_pred_schema(
             },
         },
         "x-batchpredict-csv-classification-labels": "classes",
-        "x-target-column-name": "target",
     }
 
 
