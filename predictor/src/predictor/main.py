@@ -1,16 +1,14 @@
 """Main module for the prediction server."""
 
-import sys
-import logging
-import structlog
 import os
 import threading
 
 from autogluon.tabular import TabularPredictor
-from litestar import Litestar, Request, Response, get, post, MediaType
+from litestar import Litestar, MediaType, Request, Response, get, post
 from litestar.datastructures import State
 from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
+from litestar.middleware.logging import LoggingMiddlewareConfig
 from litestar.status_codes import (
     HTTP_200_OK,
     HTTP_500_INTERNAL_SERVER_ERROR,
@@ -23,21 +21,28 @@ from predictor.schemas import (
     PredictionRequest,
     PredictionResponse,
 )
-from predictor.utils import load_model, setup_logging, LoggingMiddleware
+from predictor.utils import load_model
 
 # Constants
 _PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
 
-setup_logging(service=os.getenv("AIP_MODEL_NAME", "TabularPredictor"))
-
 # Initialize logging
-logger = structlog.get_logger()
+logging_config = LoggingConfig(
+    root={"level": "INFO", "handlers": ["queue_listener"]},
+    formatters={
+        "standard": {
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        }
+    },
+)
+
+logger = logging_config.configure()("app.main")
 
 
 def startup_model(state: State) -> None:
     """Loads the model in a background thread."""
     state.predictor = load_model()
-    logger.info("Cuda available", cuda_available=is_available())
+    logger.info("Cuda available: %s", is_available())
     # Ensure the predictor is ready for serving
     state.predictor.persist()
     state.is_model_ready = True
@@ -105,11 +110,8 @@ app = Litestar(
     route_handlers=[health_check, predict],
     on_startup=[startup],
     exception_handlers={HTTPException: app_exception_handler},
-    middleware=[LoggingMiddleware],
-    logging_config=LoggingConfig(
-        # Disable Litestar's default logging configuration since we've already set it up
-        configure_root_logger=False,
-    ),
+    logging_config=logging_config,
+    middleware=[LoggingMiddlewareConfig().middleware],
 )
 
 if __name__ == "__main__":
