@@ -4,6 +4,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+
 from trainer.config import Config, load_config
 
 

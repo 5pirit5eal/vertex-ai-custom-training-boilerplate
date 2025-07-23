@@ -1,12 +1,10 @@
-import os
-import tempfile
 from unittest.mock import Mock, mock_open, patch
-import pandas as pd
-import numpy as np
-import yaml
 
-from trainer.vertex import create_vertex_ai_eval, write_model_schemas
+import numpy as np
+import pandas as pd
+
 from trainer.config import Config
+from trainer.vertex import create_vertex_ai_eval, write_model_schemas
 
 
 class TestCreateVertexAIEval:

@@ -1,7 +1,7 @@
 """Tests for the prediction service."""
 
 from typing import Any
-from unittest.mock import MagicMock, ANY
+from unittest.mock import ANY, MagicMock
 
 import pandas as pd
 import pytest

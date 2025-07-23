@@ -5,9 +5,8 @@ from typing import Any
 import pandas as pd
 from autogluon.tabular import TabularPredictor
 
-
+from predictor.schemas import Parameters
 from predictor.utils import parse_instances_to_dataframe
-from predictor.schemas import Parameters, PredictionResponse
 
 
 def create_prediction(

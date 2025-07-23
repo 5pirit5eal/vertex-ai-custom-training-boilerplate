@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+
 from trainer.config import Config
 from trainer.data import gcs_path, load_split_df
 
