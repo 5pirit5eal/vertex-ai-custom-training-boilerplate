@@ -1,18 +1,19 @@
 """Prediction service for the application."""
 
-import logging
 from typing import Any
 
 import pandas as pd
 from autogluon.tabular import TabularPredictor
 
+
 from predictor.utils import parse_instances_to_dataframe
+from predictor.schemas import Parameters, PredictionResponse
 
 
 def create_prediction(
     model: TabularPredictor,
     instances: list[dict[str, Any] | list[Any]],
-    parameters: dict[str, Any] | None = None,
+    parameters: Parameters = Parameters(),
 ) -> list[dict[str, Any] | list[float]]:
     """Generates predictions for a given list of instances.
 
@@ -34,13 +35,9 @@ def create_prediction(
     if model.problem_type not in ["binary", "multiclass"]:
         raise ValueError("Unsupported problem type")
 
-    as_object = parameters.get("as_object")
-    if as_object is None:
-        as_pandas = not is_list
-    else:
-        as_pandas = as_object
-
-    predictions = model.predict_proba(df_to_predict, as_pandas=as_pandas)
+    predictions = model.predict_proba(
+        df_to_predict, as_pandas=parameters.as_object
+    )
 
     if isinstance(predictions, pd.DataFrame):
         response_data = predictions.to_dict(orient="records")

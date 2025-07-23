@@ -34,9 +34,7 @@ def setup_run() -> Config:
         handlers=[logging.StreamHandler(sys.stdout)],
         format="%(message)s",
     )
-    logging.getLogger("autogluon").removeHandler(
-        logging.getLogger("autogluon").handlers[0]
-    )
+    logging.getLogger("autogluon").handlers.clear()
     logging.getLogger("autogluon").addHandler(logging.StreamHandler(sys.stdout))
 
     # Load the training data.

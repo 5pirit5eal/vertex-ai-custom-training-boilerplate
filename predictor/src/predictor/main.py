@@ -1,16 +1,14 @@
 """Main module for the prediction server."""
 
-import logging
 import os
 import threading
 
 from autogluon.tabular import TabularPredictor
-from litestar import Litestar, Request, Response, get, post
+from litestar import Litestar, MediaType, Request, Response, get, post
 from litestar.datastructures import State
 from litestar.exceptions import HTTPException
-from litestar.logging import LoggingConfig, StructLoggingConfig
+from litestar.logging import LoggingConfig
 from litestar.middleware.logging import LoggingMiddlewareConfig
-from litestar.plugins.structlog import StructlogConfig, StructlogPlugin
 from litestar.status_codes import (
     HTTP_200_OK,
     HTTP_500_INTERNAL_SERVER_ERROR,
@@ -19,18 +17,32 @@ from litestar.status_codes import (
 from torch.cuda import is_available
 
 from predictor.prediction import create_prediction
-from predictor.schemas import PredictionRequest, PredictionResponse
+from predictor.schemas import (
+    PredictionRequest,
+    PredictionResponse,
+)
 from predictor.utils import load_model
 
 # Constants
 _PORT = int(os.getenv("AIP_HTTP_PORT", 8501))
 
+# Initialize logging
+logging_config = LoggingConfig(
+    root={"level": "INFO", "handlers": ["queue_listener"]},
+    formatters={
+        "standard": {
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        }
+    },
+)
+
+logger = logging_config.configure()("app.main")
+
 
 def startup_model(state: State) -> None:
     """Loads the model in a background thread."""
-    logger = logging.getLogger(__name__)
     state.predictor = load_model()
-    logger.info(f"Cuda available: {is_available()}")
+    logger.info("Cuda available: %s", is_available())
     # Ensure the predictor is ready for serving
     state.predictor.persist()
     state.is_model_ready = True
@@ -51,7 +63,7 @@ async def health_check(state: State) -> Response:
 @post(os.getenv("AIP_PREDICT_ROUTE", "/predict"))
 async def predict(
     data: PredictionRequest, state: State
-) -> PredictionResponse | HTTPException:
+) -> Response[PredictionResponse]:
     """Handles prediction requests."""
     if not state.is_model_ready:
         raise HTTPException(
@@ -67,12 +79,15 @@ async def predict(
             detail=str(e),
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    return PredictionResponse(predictions=predictions)
+    return Response(
+        content=PredictionResponse(predictions=predictions),
+        media_type=MediaType.JSON,
+        status_code=HTTP_200_OK,
+    )
 
 
 def startup(app: Litestar) -> None:
     """Starts the model loading in a background thread."""
-    logger = logging.getLogger(__name__)
     app.state.is_model_ready = False
     app.state.predictor = None
     logger.info("Starting model loading in a background thread.")
@@ -91,32 +106,12 @@ def app_exception_handler(request: Request, exc: HTTPException) -> Response:
     )
 
 
-structlog_config = StructlogConfig(
-    structlog_logging_config=StructLoggingConfig(
-        standard_lib_logging_config=LoggingConfig(
-            root={"level": "INFO", "handlers": ["queue_listener"]},
-            formatters={
-                "standard": {
-                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-                }
-            },
-        )
-    ),
-    middleware_logging_config=LoggingMiddlewareConfig(
-        exclude=[os.getenv("AIP_HEALTH_ROUTE", "/health")],
-        request_log_fields=("body",),
-        response_log_fields=("body",),
-    ),
-)
-
-structlog_plugin = StructlogPlugin(config=structlog_config)
-
-
 app = Litestar(
     route_handlers=[health_check, predict],
     on_startup=[startup],
-    plugins=[structlog_plugin],
     exception_handlers={HTTPException: app_exception_handler},
+    logging_config=logging_config,
+    middleware=[LoggingMiddlewareConfig().middleware],
 )
 
 if __name__ == "__main__":

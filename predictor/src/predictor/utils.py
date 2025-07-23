@@ -16,6 +16,9 @@ GCS_URI_PREFIX = "gs://"
 LOCAL_MODEL_DIR = "/tmp/model/"
 
 
+logger = logging.getLogger("app.utils")
+
+
 def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
     """Downloads files in a GCS directory to a local directory.
 
@@ -40,7 +43,11 @@ def download_gcs_dir_to_local(gcs_dir: str, local_dir: str) -> None:
         file_path = blob.name[len(prefix) :].strip("/")
         local_file_path = os.path.join(local_dir, file_path)
         os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-        print("Downloading", file_path, "to", local_file_path)
+        logger.info(
+            "Downloading file from %s to %s",
+            file_path,
+            local_file_path,
+        )
         blob.download_to_filename(local_file_path)
 
 
@@ -111,7 +118,7 @@ def load_model() -> TabularPredictor:
     threading.Event().wait(random.randint(0, 5))
 
     model_dir = os.getenv("AIP_STORAGE_URI", "/model/")
-    logging.info(f"Model directory passed by the user is: {model_dir}")
+    logger.info("Model directory %s passed by user", model_dir)
 
     if model_dir.startswith(GCS_URI_PREFIX):
         gcs_path = model_dir[len(GCS_URI_PREFIX) :]
@@ -123,20 +130,24 @@ def load_model() -> TabularPredictor:
             while not os.path.exists(
                 os.path.join(local_model_dir, "version.txt")
             ):
-                logging.info("Waiting until Model is finished downloading...")
+                logger.info("Waiting until Model is finished downloading...")
                 threading.Event().wait(15)
 
             # Ensure the version.txt file is fully loaded before proceeding
             threading.Event().wait(5)
         else:
-            logging.info(f"Downloading {model_dir} to {local_model_dir}")
+            logger.info(
+                "Downloading model from %s to %s",
+                model_dir,
+                local_model_dir,
+            )
             download_gcs_dir_to_local(model_dir, local_model_dir)
-            logging.info(f"Finished downloading model to {local_model_dir}")
+            logger.info("Finished downloading model to %s", local_model_dir)
 
         return TabularPredictor.load(local_model_dir)
 
     else:
-        logging.info(f"Model directory is local: {model_dir}")
+        logger.info("Model directory %s is local", model_dir)
         if not os.path.exists(model_dir):
             raise FileNotFoundError(
                 f"Model directory {model_dir} does not exist."

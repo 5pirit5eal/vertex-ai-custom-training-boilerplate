@@ -5,11 +5,17 @@ from typing import Any
 from msgspec import Struct
 
 
+class Parameters(Struct, frozen=True):
+    """Represents additional parameters for prediction requests."""
+
+    as_object: bool = False
+
+
 class PredictionRequest(Struct):
     """Represents a prediction request."""
 
     instances: list[list[Any] | dict[str, Any]]
-    parameters: dict[str, Any] | None = {}
+    parameters: Parameters = Parameters()
 
 
 class PredictionResponse(Struct):
