@@ -22,42 +22,44 @@ from sklearn.metrics import (
 from trainer.config import Config
 from trainer.data import gcs_path
 
+_TYPE_MAP: dict[str, tuple[str, str | None]] = {
+    "int": ("integer", "int64"),
+    "float": ("number", "float"),
+    "object": ("string", None),
+    "category": ("string", None),
+    "bool": ("boolean", None),
+    "datetime": ("string", "date-time"),
+    "text": ("string", None),
+}
+_EXAMPLE_MAP: dict[str, Any] = {
+    "int": "'0'",
+    "float": "'0.0'",
+    "object": "'example text'",
+    "category": "'example category'",
+    "bool": "'True'",
+    "datetime": "'2023-01-01T00:00:00Z'",
+    "text": "'example text'",
+}
+
 
 def _convert_feature_map_to_input_schema(
     map: dict[str, tuple[str, tuple]],
 ) -> dict[str, Any]:
-    type_map: dict[str, tuple[str, str | None]] = {
-        "int": ("integer", "int64"),
-        "float": ("number", "float"),
-        "object": ("string", None),
-        "category": ("string", None),
-        "bool": ("boolean", None),
-        "datetime": ("string", "date-time"),
-        "text": ("string", None),
-    }
     properties = {}
     required = []
     example = {}
     for feature, dtype in map.items():
-        openapi_type, openapi_format = type_map.get(dtype[0], ("string", None))
+        openapi_type, openapi_format = _TYPE_MAP.get(dtype[0], ("string", None))
         prop = {"type": openapi_type, "nullable": True}
         if openapi_format:
             prop["format"] = openapi_format
         properties[feature] = prop
         required.append(feature)
-
-        if dtype[0] == "int":
-            example[feature] = 0
-        elif dtype[0] == "float":
-            example[feature] = 0.0
-        elif dtype[0] == "bool":
-            example[feature] = True
-        elif dtype[0] == "datetime":
-            example[feature] = "2023-01-01T00:00:00Z"
-        elif dtype[0] in ["text", "category", "object"]:
-            example[feature] = "example text"
+        example[feature] = _EXAMPLE_MAP.get(dtype[0], None)
 
     schema = {
+        "title": "InstanceSchema",
+        "description": "Schema for model instances, used for prediction requests.",
         "type": "object",
         "required": required,
         "properties": properties,
@@ -79,19 +81,11 @@ def _convert_class_labels_to_pred_schema(
         dict[str, Any]: The schema for the class labels.
     """
     return {
-        "title": "TabularClassification",
-        "description": "Schema for classification predictions",
-        "type": "object",
-        "properties": {
-            "classes": {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    "enum": [str(label) for label in class_labels],
-                    "description": "List of class labels",
-                },
-            },
-            "scores": {
+        "title": "PredictionResponse",
+        "description": "List of predictions, either as an array of probabilities "
+        "or as a dictionary with class labels as keys based on as_object parameter.",
+        "oneOf": [
+            {
                 "type": "array",
                 "items": {
                     "type": "number",
@@ -99,10 +93,21 @@ def _convert_class_labels_to_pred_schema(
                     "minimum": 0.0,
                     "maximum": 1.0,
                 },
-                "description": "List of class probabilities for each class",
             },
-        },
-        "x-batchpredict-csv-classification-labels": "classes",
+            {
+                "type": "object",
+                "properties": {
+                    str(label): {
+                        "type": "number",
+                        "format": "float",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                    }
+                    for label in class_labels
+                },
+                "required": [str(label) for label in class_labels],
+            },
+        ],
     }
 
 

@@ -5,25 +5,20 @@ from typing import Any
 from msgspec import Struct
 
 
+class Parameters(Struct, frozen=True):
+    """Represents additional parameters for prediction requests."""
+
+    as_object: bool = False
+
+
 class PredictionRequest(Struct):
     """Represents a prediction request."""
 
     instances: list[list[Any] | dict[str, Any]]
-    parameters: dict[str, Any] | None = {}
-
-
-class AutoMLComponents(Struct):
-    """Holds the components of the result."""
-
-    classes: list[str]
-    scores: list[float]
+    parameters: Parameters = Parameters()
 
 
 class PredictionResponse(Struct):
-    """Represents a prediction response body.
+    """Represents a prediction response."""
 
-    A response either conforms to the AutoML response format or contains a list of key-value pairs,
-    class label to score.
-    """
-
-    predictions: list[AutoMLComponents | dict[str, float]]
+    predictions: list[list[float] | dict[str, Any]]
